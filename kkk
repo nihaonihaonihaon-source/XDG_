@@ -1,0 +1,1475 @@
+-- ============================================================
+-- XDG Obfuscator v18.6 · FCS 融合版
+--   - 内层：开源算法（RC4 / ChaCha20 / XOR）30~55 层
+--   - 外层：FCS v1.0 分形密码 12 层
+--   - FCS 从 3333/FCS.lua 读取
+-- ============================================================
+
+print("[XDG] v18.6 · FCS 融合版 启动")
+
+local _G_PCALL = pcall
+local _G_TYPE  = type
+local _G_LOADSTRING = type(loadstring)=="function" and loadstring or nil
+
+local bxor
+if type(bit32)=="table" and type(bit32.bxor)=="function" then
+    bxor = bit32.bxor
+else
+    bxor = function(a,b)
+        local r,p=0,1
+        while a>0 or b>0 do
+            local xa,xb=a%2,b%2
+            if xa~=xb then r=r+p end
+            a=(a-xa)/2;b=(b-xb)/2;p=p*2
+        end
+        return r
+    end
+end
+
+-- ============================================================
+-- FCS 模块加载（从 3333/FCS.lua）
+-- ============================================================
+local FCS
+do
+    local ok, mod = pcall(function()
+        local src = readfile("3333/FCS.lua")
+        if type(src) == "string" and #src > 0 then
+            local f = loadstring(src)
+            if f then return f() end
+        end
+        return nil
+    end)
+    if ok and type(mod) == "table" then
+        FCS = mod
+        print("[XDG] FCS 已从 3333/FCS.lua 载入")
+    else
+        error("[XDG] 无法载入 3333/FCS.lua")
+    end
+end
+
+local FCS_LAYERS = 12
+local FCS_KEYLEN = 64
+
+-- ============================================================
+-- 通用工具
+-- ============================================================
+local function _rndAlpha(n, pre)
+    local A = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    local s = pre or "_"
+    for _=1,n do
+        local i = math.random(1, #A)
+        s = s .. A:sub(i,i)
+    end
+    return s
+end
+
+local function _encNum(n)
+    local k1 = math.random(1,254)
+    local k2 = math.random(1,254)
+    local str
+    if type(n) == "number" and n == math.floor(n) and math.abs(n) < 2^52 then
+        str = string.format("%.0f", n)
+    else
+        str = tostring(n)
+    end
+    local enc = {}
+    for i=1,#str do
+        local b1 = bxor(str:byte(i), (k1+i*37)%256)
+        local b2 = bxor(b1, (k2+i*53)%256)
+        enc[i] = string.format("\\%03d", b2)
+    end
+    return table.concat(enc), k1, k2
+end
+
+local function _encStr(s)
+    local k1 = math.random(1, 254)
+    local k2 = math.random(1, 254)
+    local out = {}
+    for i = 1, #s do
+        local b1 = bxor(s:byte(i), (k1 + i * 37) % 256)
+        local b2 = bxor(b1, (k2 + i * 53) % 256)
+        out[i] = string.format("\\%03d", b2)
+    end
+    return table.concat(out), k1, k2
+end
+
+local function _serVal(v)
+    local tv = type(v)
+    if tv == "number" then
+        if v == math.floor(v) and math.abs(v) < 2^52 then
+            return string.format("%.0f", v)
+        end
+        return tostring(v)
+    elseif tv == "string" then
+        local out = {}
+        for j=1,#v do out[j] = string.format("\\%03d", v:byte(j)) end
+        return '"'..table.concat(out)..'"'
+    elseif tv == "boolean" then
+        return v and "true" or "false"
+    elseif tv == "table" then
+        local maxn = 0
+        for kk,_ in pairs(v) do
+            if type(kk)=="number" and kk == math.floor(kk) and kk>=1 then
+                if kk > maxn then maxn = kk end
+            end
+        end
+        local parts = {}
+        for i2=1,maxn do parts[#parts+1] = _serVal(v[i2]) end
+        for kk,vv in pairs(v) do
+            local isArrKey = type(kk)=="number" and kk == math.floor(kk) and kk>=1 and kk<=maxn
+            if not isArrKey then
+                local kstr
+                if type(kk)=="string" and kk:match("^[%a_][%w_]*$") then
+                    kstr = kk.."="
+                else
+                    kstr = "[".._serVal(kk).."]="
+                end
+                parts[#parts+1] = kstr.._serVal(vv)
+            end
+        end
+        return "{"..table.concat(parts,",").."}"
+    else
+        return "nil"
+    end
+end
+
+local function _parseD(src)
+    local s, e = src:find("local%s+D%s*=%s*")
+    if not s then return nil, "未找到 local D=" end
+    local depth = 0
+    local i = e + 1
+    local inStr = nil
+    local escaped = false
+    while i <= #src do
+        local c = src:sub(i,i)
+        if inStr then
+            if escaped then escaped = false
+            elseif c == "\\" then escaped = true
+            elseif c == inStr then inStr = nil end
+        else
+            if c == '"' or c == "'" then inStr = c
+            elseif c == "{" then depth = depth + 1
+            elseif c == "}" then
+                depth = depth - 1
+                if depth == 0 then
+                    return src:sub(e+1, i), nil, s, i
+                end
+            end
+        end
+        i = i + 1
+    end
+    return nil, "D表未闭合"
+end
+
+local function _replaceVMFAIL(s, repl)
+    local vstart = s:find("local function VMFAIL(", 1, true)
+    if not vstart then return s end
+    local p = vstart
+    while p <= #s do
+        local nl = s:find("\n", p)
+        local lineEnd = nl or (#s + 1)
+        local line = s:sub(p, lineEnd - 1)
+        if line:match("^%s*end%s*;?%s*$") then
+            return s:sub(1, vstart-1) .. repl .. s:sub(lineEnd)
+        end
+        if line:match("local function VMFAIL") and line:match("end%s*$") then
+            return s:sub(1, vstart-1) .. repl .. s:sub(lineEnd)
+        end
+        if not nl then break end
+        p = nl + 1
+    end
+    return s
+end
+
+local function hardenVM(src, report)
+    local dtext, err, dstart, dend = _parseD(src)
+    if not dtext then return nil, "D表解析失败："..tostring(err) end
+    if not _G_LOADSTRING then return nil, "环境不支持 loadstring" end
+    local chunk, cerr = _G_LOADSTRING("return "..dtext)
+    if not chunk then return nil, "D表加载失败："..tostring(cerr) end
+    local ok, D = _G_PCALL(chunk)
+    if not ok or _G_TYPE(D) ~= "table" then return nil, "D表执行失败" end
+    if _G_TYPE(D.ks) ~= "table" or #D.ks < 4 then return nil, "D.ks 格式错误" end
+    if _G_TYPE(D.p) ~= "table" then return nil, "D.p 格式错误" end
+
+    local names = {}
+    local function rnd(pre)
+        local n
+        repeat n = _rndAlpha(math.random(6,10), pre or "_") until not names[n]
+        names[n] = true
+        return n
+    end
+
+    local F_bx   = rnd("_bx")
+    local F_dc   = rnd("_dec")
+    local F_ks   = rnd("_getK")
+    local F_nm   = rnd("_getN")
+    local F_na   = rnd("_getA")
+    local F_i1   = rnd("_getI")
+    local F_i2   = rnd("_getI")
+    local F_i3   = rnd("_getI")
+    local F_i4   = rnd("_getI")
+    local F_rt   = rnd("_getR")
+    local F_omap = rnd("_lookup")
+    local F_p    = rnd("_fetch")
+    local VM_NAME = rnd("_upd")
+    local F_o    = rnd("_getO")
+
+    local pre = {}
+    pre[#pre+1] = "-- hardened v18.6"
+    pre[#pre+1] = "local "..F_bx.."=(bit32 and bit32.bxor)or function(a,b)local r,p=0,1;while a>0 or b>0 do local xa,xb=a%2,b%2;if xa~=xb then r=r+p end;a=(a-xa)/2;b=(b-xb)/2;p=p*2 end;return r end"
+    pre[#pre+1] = "local function "..F_dc.."(s,k1,k2) local o={} for i=1,#s do local b=s:byte(i) b="..F_bx.."(b,(k2+i*53)%256) b="..F_bx.."(b,(k1+i*37)%256) o[i]=b end return tonumber(string.char(table.unpack(o))) end"
+
+    local ksFns = {}
+    for i=1,#D.ks do
+        local fn = rnd("_k")
+        ksFns[i] = fn
+        local enc, k1, k2 = _encNum(D.ks[i])
+        pre[#pre+1] = string.format(
+            "local function %s() return %s(\"%s\",%d,%d) end",
+            fn, F_dc, enc, k1, k2)
+    end
+    local ksCalls = {}
+    for i, fn in ipairs(ksFns) do ksCalls[i] = fn.."()" end
+    pre[#pre+1] = "local function "..F_ks.."() return {"..table.concat(ksCalls,",").."} end"
+
+    local function makeNumField(val, fname)
+        local enc, k1, k2 = _encNum(val)
+        return string.format("local function %s() return %s(\"%s\",%d,%d) end", fname, F_dc, enc, k1, k2)
+    end
+
+    pre[#pre+1] = makeNumField(D.nummask or 0, F_nm)
+    pre[#pre+1] = makeNumField(D.numadd or 0, F_na)
+    pre[#pre+1] = makeNumField(D.ixor or 0, F_i1)
+    pre[#pre+1] = makeNumField(D.ix1 or 0, F_i2)
+    pre[#pre+1] = makeNumField(D.ix2 or 0, F_i3)
+    pre[#pre+1] = makeNumField(D.ix3 or 0, F_i4)
+    pre[#pre+1] = makeNumField(D.root or 0, F_rt)
+
+    do
+        local oParts = {}
+        for k, v in pairs(D.o or {}) do
+            local enc, k1, k2 = _encNum(v)
+            oParts[#oParts+1] = string.format("[%q]={\"%s\",%d,%d}", k, enc, k1, k2)
+        end
+        pre[#pre+1] = "local "..F_o.."_d={"..table.concat(oParts,",").."}"
+        pre[#pre+1] = string.format(
+            "local %s_c={} local function %s(k) local c=%s_c[k] if c then return c end local d=%s_d[k] if not d then return nil end local v=%s(d[1],d[2],d[3]) %s_c[k]=v %s_d[k]=nil return v end",
+            F_o, F_o, F_o, F_o, F_dc, F_o, F_o)
+    end
+
+    local omapParts = {}
+    for k, v in pairs(D.omap or {}) do
+        local enc, k1, k2 = _encNum(v)
+        omapParts[#omapParts+1] = string.format("[%d]={\"%s\",%d,%d}", k, enc, k1, k2)
+    end
+    pre[#pre+1] = "local "..F_omap.."_d={"..table.concat(omapParts,",").."}"
+    pre[#pre+1] = string.format(
+        "local %s_c={} local function %s(k) local c=%s_c[k] if c then return c end local d=%s_d[k] if not d then return nil end local v=%s(d[1],d[2],d[3]) %s_c[k]=v %s_d[k]=nil return v end",
+        F_omap, F_omap, F_omap, F_omap, F_dc, F_omap, F_omap)
+
+    local pParts = {}
+    for i, proto in ipairs(D.p or {}) do
+        pParts[#pParts+1] = "["..i.."]=".._serVal(proto)
+    end
+    pre[#pre+1] = "local "..F_p.."_d={"..table.concat(pParts,",").."}"
+    pre[#pre+1] = string.format(
+        "local %s_c={} local function %s(i) local c=%s_c[i] if c then return c end local d=%s_d[i] if not d then return nil end %s_c[i]=d return d end",
+        F_p, F_p, F_p, F_p, F_p)
+
+    local pcount = D.pcount or #D.p
+    local newD = table.concat({
+        "local D={}",
+        "local _pProxy=setmetatable({},{__index=function(_,i) return "..F_p.."(i) end})",
+        "local _omapProxy=setmetatable({},{__index=function(_,kk) return "..F_omap.."(kk) end})",
+        "setmetatable(D,{__index=function(t,k)",
+        "  if k=='ks' then return "..F_ks.."() end",
+        "  if k=='nummask' then return "..F_nm.."() end",
+        "  if k=='numadd' then return "..F_na.."() end",
+        "  if k=='ixor' then return "..F_i1.."() end",
+        "  if k=='ix1' then return "..F_i2.."() end",
+        "  if k=='ix2' then return "..F_i3.."() end",
+        "  if k=='ix3' then return "..F_i4.."() end",
+        "  if k=='root' then return "..F_rt.."() end",
+        "  if k=='o' then return setmetatable({},{__index=function(_,kk) return "..F_o.."(kk) end}) end",
+        "  if k=='omap' then return _omapProxy end",
+        "  if k=='p' then return _pProxy end",
+        "  if k=='pcount' then return "..pcount.." end",
+        "  return nil",
+        "end})",
+    }, "\n")
+
+    local afterD = src:sub(dend+1)
+    afterD = afterD:gsub("%f[%w_]_VM%f[^%w_]", VM_NAME)
+
+    local vmfailRepl
+    if report == "release" then
+        vmfailRepl = "local function VMFAIL(kind,msg,pc,A,B,C) error(\"E\"..tostring(pc),2) end"
+    else
+        vmfailRepl = "local function VMFAIL(kind,msg,pc,A,B,C) error(\"VM \"..kind..\": \"..tostring(msg)..\" pc=\"..tostring(pc)..\" A=\"..tostring(A)..\" B=\"..tostring(B)..\" C=\"..tostring(C),2) end"
+    end
+    afterD = _replaceVMFAIL(afterD, vmfailRepl)
+
+    return table.concat(pre, "\n") .. "\n" .. newD .. "\n" .. afterD, nil
+end
+
+-- ============================================================
+-- 开源算法（内层）
+-- ============================================================
+local function rc4(key, data)
+    local S = {}
+    for i = 0, 255 do S[i] = i end
+    local j = 0
+    for i = 0, 255 do
+        j = (j + S[i] + key:byte((i % #key) + 1)) % 256
+        S[i], S[j] = S[j], S[i]
+    end
+    local out, a, b = {}, 0, 0
+    for m = 1, #data do
+        a = (a + 1) % 256
+        b = (b + S[a]) % 256
+        S[a], S[b] = S[b], S[a]
+        local k = S[(S[a] + S[b]) % 256]
+        out[m] = string.char(bxor(data:byte(m), k))
+    end
+    return table.concat(out)
+end
+
+local function chacha20(key, nonce, data)
+    local b = bit32
+    if not b then return data end
+    local bor, lshift, rshift, bxor32 = b.bor, b.lshift, b.rshift, b.bxor
+    local function rotl(x, n) return bor(lshift(x, n), rshift(x, 32 - n)) end
+    local function qr(a, c, d, e)
+        a = (a + c) % 4294967296; e = rotl(bxor32(e, a), 16)
+        d = (d + e) % 4294967296; c = rotl(bxor32(c, d), 12)
+        a = (a + c) % 4294967296; e = rotl(bxor32(e, a), 8)
+        d = (d + e) % 4294967296; c = rotl(bxor32(c, d), 7)
+        return a, c, d, e
+    end
+    local function L(s, o)
+        local x, y, z, w = s:byte(o+1, o+4)
+        return x + y*256 + z*65536 + w*16777216
+    end
+    local K = {}
+    for i = 0, 7 do K[i+1] = L(key, i*4) end
+    local N = {}
+    for i = 0, 2 do N[i+1] = L(nonce, i*4) end
+    local C = {0x61707865, 0x3320646e, 0x79622d32, 0x6b206574}
+    local out = {}
+    local ctr = 0
+    for off = 1, #data, 64 do
+        local s = {C[1],C[2],C[3],C[4],K[1],K[2],K[3],K[4],K[5],K[6],K[7],K[8],ctr,N[1],N[2],N[3]}
+        local w = {s[1],s[2],s[3],s[4],s[5],s[6],s[7],s[8],s[9],s[10],s[11],s[12],s[13],s[14],s[15],s[16]}
+        for i = 1, 10 do
+            w[1],w[5],w[9],w[13]  = qr(w[1],w[5],w[9],w[13])
+            w[2],w[6],w[10],w[14] = qr(w[2],w[6],w[10],w[14])
+            w[3],w[7],w[11],w[15] = qr(w[3],w[7],w[11],w[15])
+            w[4],w[8],w[12],w[16] = qr(w[4],w[8],w[12],w[16])
+            w[1],w[6],w[11],w[16] = qr(w[1],w[6],w[11],w[16])
+            w[2],w[7],w[12],w[13] = qr(w[2],w[7],w[12],w[13])
+            w[3],w[8],w[9],w[14]  = qr(w[3],w[8],w[9],w[14])
+            w[4],w[5],w[10],w[15] = qr(w[4],w[5],w[10],w[15])
+        end
+        local ks = {}
+        for i = 1, 16 do
+            local v = (w[i] + s[i]) % 4294967296
+            ks[i*4-3] = v % 256
+            ks[i*4-2] = math.floor(v / 256) % 256
+            ks[i*4-1] = math.floor(v / 65536) % 256
+            ks[i*4]   = math.floor(v / 16777216) % 256
+        end
+        local lim = math.min(64, #data - off + 1)
+        for j = 1, lim do
+            out[#out+1] = string.char(bxor32(data:byte(off+j-1), ks[j]))
+        end
+        ctr = ctr + 1
+    end
+    return table.concat(out)
+end
+
+local function xorMask(data, mask)
+    local ml = #mask
+    if ml == 0 then return data end
+    local out = {}
+    for i = 1, #data do
+        out[i] = string.char(bxor(data:byte(i), mask:byte(((i - 1) % ml) + 1)))
+    end
+    return table.concat(out)
+end
+
+local function splitIntoChunks(s, n)
+    if #s < n then n = math.max(1, #s) end
+    if n < 1 then n = 1 end
+    local chunk = math.ceil(#s / n)
+    if chunk < 1 then chunk = 1 end
+    local parts = {}
+    for i = 1, #s, chunk do
+        parts[#parts + 1] = s:sub(i, i + chunk - 1)
+    end
+    return parts
+end
+
+local function toEscapedLiteral(s)
+    local parts = {}
+    for i = 1, #s do
+        parts[i] = string.format("\\%03d", s:byte(i))
+    end
+    return '"' .. table.concat(parts) .. '"'
+end
+
+local function xs32(x)
+    x = x % 4294967296
+    local t = (x * 8192) % 4294967296
+    x = bxor(x, t) % 4294967296
+    t = math.floor(x / 131072)
+    x = bxor(x, t) % 4294967296
+    t = (x * 32) % 4294967296
+    x = bxor(x, t) % 4294967296
+    return x % 4294967296
+end
+
+local CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+local function deriveKey(seed, len)
+    local r, x = {}, seed % 4294967296
+    for i = 1, len do
+        x = xs32(x)
+        local b = x % 256
+        r[i] = CHARSET:sub((b % #CHARSET) + 1, (b % #CHARSET) + 1)
+    end
+    return table.concat(r)
+end
+
+local POOL = {
+    {name="ChaCha20",     w=5},
+    {name="RC4",          w=5},
+    {name="XOR",          w=3},
+    {name="RC4_XOR",      w=4},
+    {name="ChaCha20_XOR", w=3},
+}
+local TOTAL_W = 0
+for _,e in ipairs(POOL) do TOTAL_W = TOTAL_W + e.w end
+
+local function deriveLayerConfig(seed, layerCount)
+    local cfg, s = {}, seed % 4294967296
+    local function nr(mod)
+        s = xs32(s)
+        return (s % mod) + 1
+    end
+    for i = 1, layerCount do
+        local r, acc, algo = nr(TOTAL_W), 0, "RC4"
+        for _,e in ipairs(POOL) do
+            acc = acc + e.w
+            if r <= acc then algo = e.name; break end
+        end
+        local c = {t = algo}
+        if algo == "ChaCha20" then c.klen=100; c.nlen=100
+        elseif algo == "RC4" then c.klen=100
+        elseif algo == "XOR" then c.klen=100
+        elseif algo == "RC4_XOR" then c.klen=100; c.k2len=100
+        elseif algo == "ChaCha20_XOR" then c.klen=100; c.nlen=100; c.k2len=100 end
+        c.k = deriveKey(nr(4294967296), c.klen)
+        if c.nlen  then c.n  = deriveKey(nr(4294967296), c.nlen)  end
+        if c.k2len then c.k2 = deriveKey(nr(4294967296), c.k2len) end
+        cfg[i] = c
+    end
+    return cfg
+end
+
+local function encLayer(t, data, k1, k2, n)
+    if t == "ChaCha20"     then return chacha20(k1, n, data) end
+    if t == "RC4"          then return rc4(k1, data) end
+    if t == "XOR"          then return xorMask(data, k1) end
+    if t == "RC4_XOR"      then return xorMask(rc4(k1, data), k2) end
+    if t == "ChaCha20_XOR" then return xorMask(chacha20(k1, n, data), k2) end
+    return data
+end
+
+local function polyParams(level)
+    if level == "low" then
+        return {layers=15+math.random(0,8),slots=12+math.random(0,8),parts=3+math.random(0,3),junkMin=20,junkMax=40,varMin=6,varMax=10}
+    elseif level == "high" then
+        return {layers=40+math.random(0,15),slots=28+math.random(0,14),parts=8+math.random(0,12),junkMin=60,junkMax=120,varMin=8,varMax=16}
+    else
+        return {layers=30+math.random(0,10),slots=18+math.random(0,10),parts=5+math.random(0,6),junkMin=40,junkMax=80,varMin=7,varMax=12}
+    end
+end
+
+local function genOpcodeMap()
+    local used, map = {}, {}
+    local function pick()
+        local v
+        repeat v = math.random(0, 255) until not used[v]
+        used[v] = true
+        return v
+    end
+    map.LOAD=pick();map.CALL=pick();map.HALT=pick()
+    map.NOP=pick();map.JUMP=pick();map.FAKE1=pick();map.FAKE2=pick()
+    return map
+end
+
+local function shardKey100(key, layerSeed)
+    local n = #key
+    if n < 100 then
+        local pad = {}
+        for i = 1, 100 - n do pad[i] = string.char(math.random(0,255)) end
+        key = key .. table.concat(pad)
+    elseif n > 100 then
+        key = key:sub(1, 100)
+    end
+    local shards = {}
+    for i = 1, 100 do
+        local b = key:byte(i)
+        local mv = (layerSeed * 31 + i * 17 + 113) % 256
+        shards[i] = bxor(b, mv)
+    end
+    return shards
+end
+
+local function makeShuffleOrder()
+    local order = {}
+    for i = 1, 100 do order[i] = i end
+    for i = 100, 2, -1 do
+        local j = math.random(1, i)
+        order[i], order[j] = order[j], order[i]
+    end
+    return order
+end
+
+local function shuffleShards(shards, order)
+    local out = {}
+    for i = 1, 100 do out[i] = shards[order[i]] end
+    return out
+end
+
+local function computeGuard(seed, values)
+    local h = 5381
+    local function mix(n)
+        local s = tostring(n)
+        for i = 1, #s do h = (h * 33 + s:byte(i)) % 4294967296 end
+    end
+    mix(seed)
+    for i = 1, #values do mix(values[i]) end
+    return h
+end
+
+local function fcsNonceGen()
+    local parts = {}
+    for i = 1, 4 do
+        parts[i] = string.format("%08x", math.random(0, 0xFFFFFFFF))
+    end
+    return table.concat(parts)
+end
+
+-- ============================================================
+-- 主混淆函数
+-- ============================================================
+local function obfuscate(src, opts)
+    opts = opts or {}
+    local level  = opts.level  or "medium"
+    local mode   = opts.mode   or "normal"
+    local report = opts.report or "release"
+
+    if mode == "vm_harden" then
+        local hardened, herr = hardenVM(src, report)
+        if type(hardened) ~= "string" then
+            return nil, "VM加固失败："..tostring(herr or "unknown")
+        end
+        if type(writefile) == "function" then
+            pcall(function()
+                if type(makefolder)=="function" and type(isfolder)=="function" and not isfolder("3333") then
+                    makefolder("3333")
+                end
+                writefile("3333/hardened_debug.lua", hardened)
+            end)
+        end
+        src = hardened
+    end
+
+    math.randomseed(os.time() + math.floor((tick and tick() or 0) * 1000) + math.random(1, 1e6))
+
+    local P = polyParams(level)
+    local LAYER_COUNT = P.layers
+    local SLOTS       = P.slots
+    local FINAL_PARTS = P.parts
+
+    local SEED = math.random(1, 2147483646) * 2 + math.random(0, 1)
+    local cfg = deriveLayerConfig(SEED, LAYER_COUNT)
+
+    -- 内层：开源算法
+    local cur = src
+    for i = 1, LAYER_COUNT do
+        local c = cfg[i]
+        cur = encLayer(c.t, cur, c.k, c.k2, c.n)
+    end
+    local eN = cur
+
+    -- 外层：12 层 FCS
+    local fcsLayers = {}
+    for i = 1, FCS_LAYERS do
+        local kseed = math.random(1, 4294967295) ~ math.floor((tick and tick() or 0) * 1000000) % 4294967296
+        local k = deriveKey(kseed, FCS_KEYLEN)
+        local n = fcsNonceGen()
+        fcsLayers[i] = { k = k, n = n }
+    end
+
+    local outer = eN
+    for i = 1, FCS_LAYERS do
+        local c = FCS.new(fcsLayers[i].k, fcsLayers[i].n)
+        outer = c:encrypt(outer, "L" .. i)
+    end
+    local finalPayload = outer
+
+    -- 内层混淆参数
+    local sp = {
+        SEED % 256,
+        math.floor(SEED / 256) % 256,
+        math.floor(SEED / 65536) % 256,
+        math.floor(SEED / 16777216) % 256,
+    }
+    local mul, off = {}, {}
+    for i = 1, 4 do
+        local m
+        repeat m = math.random(1, 255) until m % 2 == 1
+        mul[i] = m
+        off[i] = math.random(1, 200)
+    end
+    local enc = {}
+    for i = 1, 4 do enc[i] = (sp[i] * mul[i] + off[i]) % 256 end
+
+    local slotData, slotOff = {}, {}
+    for i = 1, SLOTS do
+        slotData[i] = math.random(1, 255)
+        slotOff[i]  = math.random(1, 200)
+    end
+    local perm = {}
+    for i = 1, SLOTS do perm[i] = i end
+    for i = SLOTS, 2, -1 do
+        local j = math.random(1, i)
+        perm[i], perm[j] = perm[j], perm[i]
+    end
+    local realIdx = {}
+    for k = 1, 4 do
+        local idx = perm[k]
+        slotData[idx] = enc[k]
+        slotOff[idx]  = off[k]
+        realIdx[k] = idx
+    end
+
+    local invMul = {}
+    for k = 1, 4 do
+        local m = mul[k]
+        local a, b = m, 256
+        local x0, x1 = 1, 0
+        while b ~= 0 do
+            local q = math.floor(a / b)
+            a, b = b, a - q * b
+            x0, x1 = x1, x0 - q * x1
+        end
+        invMul[k] = ((x0 % 256) + 256) % 256
+    end
+
+    local KS = {}
+    for i = 1, LAYER_COUNT do
+        local c = cfg[i]
+        local ls = (SEED + i * 997) % 4294967296
+        local entryK, entryK2, entryN = nil, nil, nil
+        if c.k then
+            local sh = shardKey100(c.k, ls)
+            local ord = makeShuffleOrder()
+            entryK = {ls=ls, ord=ord, d=shuffleShards(sh, ord)}
+        end
+        if c.k2 then
+            local sh = shardKey100(c.k2, ls+1)
+            local ord = makeShuffleOrder()
+            entryK2 = {ls=ls+1, ord=ord, d=shuffleShards(sh, ord)}
+        end
+        if c.n then
+            local sh = shardKey100(c.n, ls+2)
+            local ord = makeShuffleOrder()
+            entryN = {ls=ls+2, ord=ord, d=shuffleShards(sh, ord)}
+        end
+        KS[i] = {entryK, entryK2, entryN}
+    end
+
+    local guardVals = {}
+    for i = 1, #enc do guardVals[#guardVals+1] = enc[i] end
+    for i = 1, #mul do guardVals[#guardVals+1] = mul[i] end
+    for i = 1, #off do guardVals[#guardVals+1] = off[i] end
+    guardVals[#guardVals+1] = LAYER_COUNT
+    guardVals[#guardVals+1] = SLOTS
+    local guard = computeGuard(SEED, guardVals)
+
+    local nm = (function()
+        local used = {}
+        local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        return function()
+            local s
+            repeat
+                local t = {"_"}
+                local len = math.random(P.varMin, P.varMax)
+                for i = 1, len do
+                    local p = math.random(1, #chars)
+                    t[#t+1] = chars:sub(p, p)
+                end
+                s = table.concat(t)
+            until not used[s]
+            used[s] = true
+            return s
+        end
+    end)()
+
+    local OM = genOpcodeMap()
+
+    local BX, b2s, E10 = nm(), nm(), nm()
+    local SRC, INSTR, REGS, PC, OP = nm(), nm(), nm(), nm(), nm()
+    local rc4Dec, chachaDec, DECFN = nm(), nm(), nm()
+    local junkA, junkB, junkC, junkD, junkE = nm(), nm(), nm(), nm(), nm()
+    local SLOT, IDXT, MUL, OFFT = nm(), nm(), nm(), nm()
+    local KST, ASMK = nm(), nm()
+    local TMP = "_T"
+
+    local L = {}
+    local function add(s) L[#L+1] = s end
+
+    add("-- protected v18.6 FCS-fused")
+    add("local _OP=pcall local _OT=type")
+    add("local _OLS=_OT(loadstring)=='function' and loadstring or nil")
+    add("local _OCG=_OT(collectgarbage)=='function' and collectgarbage or nil")
+    add("do")
+    add("  if _OLS then")
+    add("    local ok,pr=_OP(_OLS,'return 1+1')")
+    add("    if not ok or _OT(pr)~='function' then error('_X:LOCK',0) end")
+    add("    local ok2,v=_OP(pr)")
+    add("    if not ok2 or v~=2 then error('_X:LOCK',0) end")
+    add("  end")
+    add("  local ok3,r3=_OP(function() return 42 end)")
+    add("  if not ok3 or r3~=42 then error('_X:LOCK',0) end")
+    add("end")
+    add("do")
+    add("  local d=debug")
+    add("  if _OT(d)=='table' and _OT(d.getinfo)=='function' then")
+    add("    local ok,info=_OP(d.getinfo,d.getinfo)")
+    add("    if ok and _OT(info)=='table' and info.what=='Lua' then error('_X:DBG',0) end")
+    add("  end")
+    add("end")
+
+    -- FCS 内嵌 + 12 层解密
+    add("-- FCS v1.0 embedded")
+    add("local FCS=(function()")
+    local fcsEmbed = ""
+    do
+        local ok = pcall(function()
+            if type(readfile) == "function" then
+                fcsEmbed = readfile("3333/FCS.lua") or ""
+            end
+        end)
+        if fcsEmbed == "" then
+            fcsEmbed = "error('FCS.lua missing at 3333/FCS.lua')"
+        end
+    end
+    add("  local _SRC=" .. toEscapedLiteral(fcsEmbed))
+    add("  local _f=(loadstring or load)(_SRC)")
+    add("  return _f()")
+    add("end)()")
+
+    add("local _FK={}")
+    for i = 1, FCS_LAYERS do
+        local d = fcsLayers[i]
+        local ek, k1, k2 = _encStr(d.k)
+        local en, n1, n2 = _encStr(d.n)
+        add(string.format(
+            "_FK[%d]={{\"%s\",%d,%d},{\"%s\",%d,%d}}",
+            i, ek, k1, k2, en, n1, n2))
+    end
+
+    do
+        local parts = splitIntoChunks(finalPayload, 16)
+        local exprs = {}
+        for i, p in ipairs(parts) do
+            exprs[i] = toEscapedLiteral(p)
+        end
+        add("local _FP=table.concat({"..table.concat(exprs,",").."})")
+    end
+
+    add("do")
+    add("  local _dt=function(s,k1,k2)")
+    add("    local o={} for i=1,#s do local b=s:byte(i)")
+    add("      b=bit32.bxor(b,(k2+i*53)%256)")
+    add("      b=bit32.bxor(b,(k1+i*37)%256)")
+    add("      o[i]=string.char(b) end return table.concat(o) end")
+    add("  for i="..FCS_LAYERS..",1,-1 do")
+    add("    local d=_FK[i]")
+    add("    local k=_dt(d[1][1],d[1][2],d[1][3])")
+    add("    local n=_dt(d[2][1],d[2][2],d[2][3])")
+    add("    local c=FCS.new(k,n)")
+    add("    _FP=c:decrypt(_FP,'L'..i)")
+    add("    k=nil d=nil _FK[i]=nil")
+    add("    if _OCG then _OP(_OCG,'collect') end")
+    add("  end")
+    add("end")
+
+    add("local "..SRC.."=_FP")
+    add("_FP=nil _FK=nil")
+
+    -- 原逻辑继续
+    add("local "..BX.."=(bit32 and bit32.bxor)or function(a,b)local r,p=0,1;while a>0 or b>0 do local xa,xb=a%2,b%2;if xa~=xb then r=r+p end;a=(a-xa)/2;b=(b-xb)/2;p=p*2 end;return r end")
+    add("local function "..b2s.."(t)local r={}for i=1,#t do r[i]=string.char(t[i])end;return table.concat(r)end")
+    add("local "..E10.."="..SRC)
+
+    add("do")
+    add("  local _H=5381")
+    add("  local function _m(n) local s=tostring(n) for i=1,#s do _H=(_H*33+s:byte(i))%4294967296 end end")
+    add("  _m("..SEED..")")
+    for i=1,#guardVals do add("  _m("..guardVals[i]..")") end
+    add("  if _H~="..guard.." then error('_X:INT',0) end")
+    add("end")
+
+    local slotExprs = {}
+    for i = 1, SLOTS do slotExprs[i] = "{"..slotData[i]..","..slotOff[i].."}" end
+    add("local "..SLOT.."={"..table.concat(slotExprs,",").."}")
+
+    local idxExprs = {}
+    for k = 1, 4 do idxExprs[k] = tostring(realIdx[k]) end
+    add("local "..IDXT.."={"..table.concat(idxExprs,",").."}")
+
+    local mulExprs = {}
+    for k = 1, 4 do mulExprs[k] = tostring(mul[k]) end
+    add("local "..MUL.."={"..table.concat(mulExprs,",").."}")
+
+    local invExprs = {}
+    for k = 1, 4 do invExprs[k] = tostring(invMul[k]) end
+    add("local "..OFFT.."={"..table.concat(invExprs,",").."}")
+
+    add("local "..junkA.."="..tostring(math.random(1000,9999)))
+    add("local "..junkB.."=("..junkA.."*7+13)%251")
+    add("local "..junkC.."=("..junkA.."*1000000)%97")
+    add("local "..junkD.."=("..junkA.."*13+7)%89")
+    add("local "..junkE.."=("..junkD.."*3+7)%101")
+
+    local function serEntry(e)
+        if not e then return "nil" end
+        local dparts = {}
+        for i = 1, #e.d do dparts[i] = tostring(e.d[i]) end
+        local oparts = {}
+        for i = 1, #e.ord do oparts[i] = tostring(e.ord[i]) end
+        return "{ls="..e.ls..",ord={"..table.concat(oparts,",").."},d={"..table.concat(dparts,",").."}}"
+    end
+
+    add("local "..KST.."={")
+    for i = 1, LAYER_COUNT do
+        local e = KS[i]
+        add("  {"..serEntry(e[1])..","..serEntry(e[2])..","..serEntry(e[3]).."},")
+    end
+    add("}")
+
+    add("local function "..ASMK.."(e)")
+    add("  if not e then return nil end")
+    add("  local ls=e.ls local ord=e.ord local d=e.d")
+    add("  local out={}")
+    add("  for pos=1,100 do")
+    add("    local ri=ord[pos]")
+    add("    local ec=d[pos]")
+    add("    local mv=(ls*31+ri*17+113)%256")
+    add("    out[ri]=string.char("..BX.."(ec,mv))")
+    add("  end")
+    add("  e.d=nil e.ord=nil")
+    add("  if _OCG then _OP(_OCG,'collect') end")
+    add("  return table.concat(out)")
+    add("end")
+
+    add("local function "..rc4Dec.."(_k,_e)")
+    add("  local _S={} for _j=0,255 do _S[_j]=_j end")
+    add("  local _x=0")
+    add("  for _j=0,255 do _x=(_x+_S[_j]+_k:byte((_j%#_k)+1))%256 _S[_j],_S[_x]=_S[_x],_S[_j] end")
+    add("  local _o={} local _a,_b=0,0")
+    add("  for _m=1,#_e do")
+    add("    _a=(_a+1)%256 _b=(_b+_S[_a])%256 _S[_a],_S[_b]=_S[_b],_S[_a]")
+    add("    _o[_m]=string.char("..BX.."(_e:byte(_m),_S[(_S[_a]+_S[_b])%256]))")
+    add("  end")
+    add("  return table.concat(_o)")
+    add("end")
+
+    add("local function "..chachaDec.."(_k,_n,_d)")
+    add("  local b=bit32")
+    add("  if not b then return _d end")
+    add("  local bor,bxor2,lshift,rshift=b.bor,b.bxor,b.lshift,b.rshift")
+    add("  local function rotl(x,n) return bor(lshift(x,n),rshift(x,32-n)) end")
+    add("  local function qr(a,c,d,e)")
+    add("    a=(a+c)%4294967296 e=rotl(bxor2(e,a),16)")
+    add("    d=(d+e)%4294967296 c=rotl(bxor2(c,d),12)")
+    add("    a=(a+c)%4294967296 e=rotl(bxor2(e,a),8)")
+    add("    d=(d+e)%4294967296 c=rotl(bxor2(c,d),7)")
+    add("    return a,c,d,e end")
+    add("  local function L(s,o) local x,y,z,w=s:byte(o+1,o+4) return x+y*256+z*65536+w*16777216 end")
+    add("  local K={} for i=0,7 do K[i+1]=L(_k,i*4) end")
+    add("  local N={} for i=0,2 do N[i+1]=L(_n,i*4) end")
+    add("  local C={0x61707865,0x3320646e,0x79622d32,0x6b206574}")
+    add("  local out={} local ctr=0")
+    add("  for off=1,#_d,64 do")
+    add("    local s={C[1],C[2],C[3],C[4],K[1],K[2],K[3],K[4],K[5],K[6],K[7],K[8],ctr,N[1],N[2],N[3]}")
+    add("    local w={s[1],s[2],s[3],s[4],s[5],s[6],s[7],s[8],s[9],s[10],s[11],s[12],s[13],s[14],s[15],s[16]}")
+    add("    for i=1,10 do")
+    add("      w[1],w[5],w[9],w[13]=qr(w[1],w[5],w[9],w[13])")
+    add("      w[2],w[6],w[10],w[14]=qr(w[2],w[6],w[10],w[14])")
+    add("      w[3],w[7],w[11],w[15]=qr(w[3],w[7],w[11],w[15])")
+    add("      w[4],w[8],w[12],w[16]=qr(w[4],w[8],w[12],w[16])")
+    add("      w[1],w[6],w[11],w[16]=qr(w[1],w[6],w[11],w[16])")
+    add("      w[2],w[7],w[12],w[13]=qr(w[2],w[7],w[12],w[13])")
+    add("      w[3],w[8],w[9],w[14]=qr(w[3],w[8],w[9],w[14])")
+    add("      w[4],w[5],w[10],w[15]=qr(w[4],w[5],w[10],w[15])")
+    add("    end")
+    add("    local ks={}")
+    add("    for i=1,16 do")
+    add("      local v=(w[i]+s[i])%4294967296")
+    add("      ks[i*4-3]=v%256 ks[i*4-2]=math.floor(v/256)%256")
+    add("      ks[i*4-1]=math.floor(v/65536)%256 ks[i*4]=math.floor(v/16777216)%256")
+    add("    end")
+    add("    local lim=math.min(64,#_d-off+1)")
+    add("    for j=1,lim do out[#out+1]=string.char(bxor2(_d:byte(off+j-1),ks[j])) end")
+    add("    ctr=ctr+1")
+    add("  end")
+    add("  return table.concat(out)")
+    add("end")
+
+    add("local function "..DECFN.."(t,d,k1,k2,n)")
+    add("  if t=='ChaCha20' then return "..chachaDec.."(k1,n,d) end")
+    add("  if t=='RC4' then return "..rc4Dec.."(k1,d) end")
+    add("  if t=='XOR' then")
+    add("    local o={} local ml=#k1")
+    add("    for i=1,#d do o[i]=string.char("..BX.."(d:byte(i),k1:byte(((i-1)%ml)+1))) end")
+    add("    return table.concat(o) end")
+    add("  if t=='RC4_XOR' then")
+    add("    local r="..rc4Dec.."(k1,d) local o={} local ml=#k2")
+    add("    for i=1,#r do o[i]=string.char("..BX.."(r:byte(i),k2:byte(((i-1)%ml)+1))) end")
+    add("    return table.concat(o) end")
+    add("  if t=='ChaCha20_XOR' then")
+    add("    local r="..chachaDec.."(k1,n,d) local o={} local ml=#k2")
+    add("    for i=1,#r do o[i]=string.char("..BX.."(r:byte(i),k2:byte(((i-1)%ml)+1))) end")
+    add("    return table.concat(o) end")
+    add("  return d")
+    add("end")
+
+    add("local _p={}")
+    add("for _k=1,4 do")
+    add("  local _i="..IDXT.."[_k] local _s="..SLOT.."[_i]")
+    add("  local _v=(_s[1]-_s[2])%256")
+    add("  _p[_k]=(_v*"..OFFT.."[_k])%256")
+    add("end")
+    add("local _seed=(_p[1]+_p[2]*256+_p[3]*65536+_p[4]*16777216)%4294967296")
+    add("_p=nil")
+
+    local typeExprs = {}
+    for i = 1, LAYER_COUNT do typeExprs[i] = "'"..cfg[i].t.."'" end
+    add("local _KT={"..table.concat(typeExprs,",").."}")
+
+    for i = 1, LAYER_COUNT do
+        if i > 1 then add("local "..TMP..i) end
+    end
+    add("local "..SRC.."2")
+
+    for i = LAYER_COUNT, 1, -1 do
+        local targetVar = (i == 1) and (SRC.."2") or (TMP..i)
+        local prevVar
+        if i == LAYER_COUNT then prevVar = E10 else prevVar = TMP..(i+1) end
+        add("do")
+        add("  local _e="..KST.."["..i.."]")
+        add("  local _k="..ASMK.."(_e[1])")
+        add("  local _k2="..ASMK.."(_e[2])")
+        add("  local _n="..ASMK.."(_e[3])")
+        add("  "..targetVar.."="..DECFN.."(_KT["..i.."],"..prevVar..",_k,_k2,_n)")
+        add("  _k=nil _k2=nil _n=nil _e=nil "..KST.."["..i.."]=nil")
+        add("  if _OCG then _OP(_OCG,'collect') end")
+        add("end")
+    end
+
+    local instrs = {}
+    local function emit(op, a, b, c) instrs[#instrs+1] = {op, a or 0, b or 0, c or 0} end
+    local jMin, jMax = P.junkMin, P.junkMax
+    local function junkN() return math.random(jMin, jMax) end
+
+    for i=1, junkN() do
+        local r = math.random(1, 4)
+        if r == 1 then emit(OM.FAKE1)
+        elseif r == 2 then emit(OM.FAKE2)
+        elseif r == 3 then emit(OM.NOP)
+        else emit(OM.JUMP, math.random(1, 5)) end
+    end
+    emit(OM.LOAD, 0)
+    for i=1, junkN() do
+        local r = math.random(1, 4)
+        if r == 1 then emit(OM.FAKE1)
+        elseif r == 2 then emit(OM.NOP)
+        else emit(OM.JUMP, math.random(1, 5)) end
+    end
+    emit(OM.CALL, 0)
+    for i=1, junkN() do
+        local r = math.random(1, 3)
+        if r == 1 then emit(OM.FAKE2)
+        else emit(OM.NOP) end
+    end
+    emit(OM.HALT)
+
+    local instrExprs = {}
+    for i, ins in ipairs(instrs) do
+        instrExprs[i] = "{"..ins[1]..","..ins[2]..","..ins[3]..","..ins[4].."}"
+    end
+
+    add("local "..INSTR.."={"..table.concat(instrExprs,",").."}")
+    add("local "..REGS.."={}")
+    add("local "..PC.."=1")
+    add("local "..OP.."=0")
+    add("local _pred=("..junkE.."*2+1)%2==1")
+    add("while true do")
+    add("  local _ins="..INSTR.."["..PC.."]")
+    add("  if not _ins then break end")
+    add("  "..OP.."=_ins[1]")
+    add("  if "..OP.."=="..OM.LOAD.." then")
+    add("    local _src="..SRC.."2")
+    add("    local _f=_OLS and _OLS(_src) or loadstring(_src)")
+    add("    _src=nil "..SRC.."2=nil")
+    add("    if _OCG then _OP(_OCG,'collect') end")
+    add("    if not _f then error('LDF') end")
+    add("    "..REGS.."[_ins[2]]=_f "..PC.."="..PC.."+1")
+    add("  elseif "..OP.."=="..OM.CALL.." then")
+    add("    local _fn="..REGS.."[_ins[2]]")
+    add("    if type(_fn)~='function' then error('CALL') end")
+    add("    _fn() "..PC.."="..PC.."+1")
+    add("  elseif "..OP.."=="..OM.HALT.." then break")
+    add("  elseif "..OP.."=="..OM.NOP.." then "..PC.."="..PC.."+1")
+    add("  elseif "..OP.."=="..OM.JUMP.." then")
+    add("    if _pred then "..PC.."="..PC.."+1 else "..PC.."=_ins[2] end")
+    add("  elseif "..OP.."=="..OM.FAKE1.." then")
+    add("    if false then error('X') end "..PC.."="..PC.."+1")
+    add("  elseif "..OP.."=="..OM.FAKE2.." then")
+    add("    if _pred and false then error('Y') end "..PC.."="..PC.."+1")
+    add("  else error('OP:'..tostring("..OP..")) end")
+    add("end")
+
+    return table.concat(L, "\n")
+end
+
+-- ============================================================
+-- 文件 API + GUI
+-- ============================================================
+local hasWriteFile  = type(writefile)  == "function"
+local hasMakeFolder = type(makefolder) == "function"
+local hasIsFolder   = type(isfolder)   == "function"
+local hasIsFile     = type(isfile)     == "function"
+local DIR = "3333"
+
+local function ensureFolder()
+    if not hasMakeFolder then return false end
+    if hasIsFolder then
+        if not isfolder(DIR) then pcall(makefolder, DIR) end
+    else
+        pcall(makefolder, DIR)
+    end
+    return true
+end
+
+local function nextOutputPath()
+    if not hasWriteFile then return nil end
+    ensureFolder()
+    local i = 1
+    if hasIsFile then
+        while isfile(DIR .. "/qwe." .. i) do i = i + 1 end
+    end
+    return DIR .. "/qwe." .. i
+end
+
+local function saveToFile(content)
+    if not hasWriteFile then return nil, "no writefile" end
+    if content == nil or content == "" then return nil, "empty" end
+    local path = nextOutputPath()
+    if not path then return nil, "no path" end
+    local ok, err = pcall(writefile, path, content)
+    if ok then return path end
+    return nil, tostring(err)
+end
+
+local Players = game:GetService("Players")
+local player  = Players.LocalPlayer
+local pg      = player:WaitForChild("PlayerGui")
+
+local _KILL = {"XDG_Obf_v18","XDG_Obf_v17","XDG_Obf_v16","XDG_Obf_v15","XDG_Obf_v14","XDG_Obf"}
+for _, name in ipairs(_KILL) do
+    for _, o in ipairs(pg:GetChildren()) do
+        if o.Name == name then pcall(function() o:Destroy() end) end
+    end
+end
+for _, o in ipairs(pg:GetChildren()) do
+    if type(o.Name)=="string" and o.Name:find("XDG_Obf", 1, true) then
+        pcall(function() o:Destroy() end)
+    end
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "XDG_Obf_v18"
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 2147483647
+gui.IgnoreGuiInset = true
+gui.Parent = pg
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 280, 0, 258)
+frame.Position = UDim2.new(0.5, -140, 0.5, -129)
+frame.BackgroundColor3 = Color3.fromRGB(18, 20, 28)
+frame.BackgroundTransparency = 0.1
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.ClipsDescendants = true
+frame.ZIndex = 10
+frame.Parent = gui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 7)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(90, 140, 220)
+stroke.Thickness = 1
+stroke.Transparency = 0.4
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -40, 0, 16)
+title.Position = UDim2.new(0, 6, 0, 3)
+title.BackgroundTransparency = 1
+title.Text = "◆ XDG v18.6 · FCS"
+title.TextColor3 = Color3.fromRGB(220, 230, 250)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Font = Enum.Font.GothamBold
+title.TextSize = 9
+title.ZIndex = 12
+title.Parent = frame
+
+local btnClose = Instance.new("TextButton")
+btnClose.Size = UDim2.new(0, 22, 0, 22)
+btnClose.Position = UDim2.new(1, -26, 0, 3)
+btnClose.BackgroundColor3 = Color3.fromRGB(220, 60, 80)
+btnClose.Text = "✕"
+btnClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnClose.Font = Enum.Font.GothamBold
+btnClose.TextSize = 12
+btnClose.BorderSizePixel = 0
+btnClose.ZIndex = 20
+btnClose.Parent = frame
+
+local xc = Instance.new("UICorner")
+xc.CornerRadius = UDim.new(0, 5)
+xc.Parent = btnClose
+
+btnClose.MouseButton1Click:Connect(function() gui:Destroy() end)
+
+local input = Instance.new("TextBox")
+input.Size = UDim2.new(1, -12, 0, 40)
+input.Position = UDim2.new(0, 6, 0, 28)
+input.BackgroundColor3 = Color3.fromRGB(12, 14, 20)
+input.BackgroundTransparency = 0.25
+input.BorderSizePixel = 0
+input.Text = ""
+input.PlaceholderText = "粘贴代码……"
+input.TextColor3 = Color3.fromRGB(210, 220, 240)
+input.PlaceholderColor3 = Color3.fromRGB(90, 100, 120)
+input.Font = Enum.Font.Code
+input.TextSize = 8
+input.TextXAlignment = Enum.TextXAlignment.Left
+input.TextYAlignment = Enum.TextYAlignment.Top
+input.ClearTextOnFocus = false
+input.MultiLine = true
+input.TextWrapped = true
+input.ZIndex = 12
+input.Parent = frame
+
+local ic = Instance.new("UICorner")
+ic.CornerRadius = UDim.new(0, 4)
+ic.Parent = input
+
+local curMode = "normal"
+local modeBar = Instance.new("Frame")
+modeBar.Size = UDim2.new(1, -12, 0, 18)
+modeBar.Position = UDim2.new(0, 6, 0, 72)
+modeBar.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+modeBar.BackgroundTransparency = 0.2
+modeBar.BorderSizePixel = 0
+modeBar.ZIndex = 12
+modeBar.Parent = frame
+
+local mbc = Instance.new("UICorner")
+mbc.CornerRadius = UDim.new(0, 4)
+mbc.Parent = modeBar
+
+local function makeModeBtn(text, mode, xOff, w)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, 14)
+    b.Position = UDim2.new(0, xOff, 0, 2)
+    b.BackgroundColor3 = (mode == "normal") and Color3.fromRGB(60, 130, 220) or Color3.fromRGB(40, 50, 70)
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(230, 235, 250)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 7
+    b.BorderSizePixel = 0
+    b.ZIndex = 13
+    b.Parent = modeBar
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 3)
+    c.Parent = b
+    b.MouseButton1Click:Connect(function()
+        curMode = mode
+        for _, child in ipairs(modeBar:GetChildren()) do
+            if child:IsA("TextButton") then child.BackgroundColor3 = Color3.fromRGB(40, 50, 70) end
+        end
+        b.BackgroundColor3 = Color3.fromRGB(60, 130, 220)
+    end)
+    return b
+end
+
+makeModeBtn("普通", "normal", 2, 120)
+makeModeBtn("VM加固", "vm_harden", 124, 148)
+
+local curReport = "release"
+local repBar = Instance.new("Frame")
+repBar.Size = UDim2.new(1, -12, 0, 18)
+repBar.Position = UDim2.new(0, 6, 0, 92)
+repBar.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+repBar.BackgroundTransparency = 0.2
+repBar.BorderSizePixel = 0
+repBar.ZIndex = 12
+repBar.Parent = frame
+
+local rbc = Instance.new("UICorner")
+rbc.CornerRadius = UDim.new(0, 4)
+rbc.Parent = repBar
+
+local function makeRepBtn(text, mode, xOff, w)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, 14)
+    b.Position = UDim2.new(0, xOff, 0, 2)
+    b.BackgroundColor3 = (mode == "release") and Color3.fromRGB(60, 130, 220) or Color3.fromRGB(40, 50, 70)
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(230, 235, 250)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 7
+    b.BorderSizePixel = 0
+    b.ZIndex = 13
+    b.Parent = repBar
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 3)
+    c.Parent = b
+    b.MouseButton1Click:Connect(function()
+        curReport = mode
+        for _, child in ipairs(repBar:GetChildren()) do
+            if child:IsA("TextButton") then child.BackgroundColor3 = Color3.fromRGB(40, 50, 70) end
+        end
+        b.BackgroundColor3 = Color3.fromRGB(60, 130, 220)
+    end)
+    return b
+end
+
+makeRepBtn("发布", "release", 2, 120)
+makeRepBtn("调试", "debug", 124, 148)
+
+local curLevel = "medium"
+local levelBar = Instance.new("Frame")
+levelBar.Size = UDim2.new(1, -12, 0, 18)
+levelBar.Position = UDim2.new(0, 6, 0, 112)
+levelBar.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+levelBar.BackgroundTransparency = 0.2
+levelBar.BorderSizePixel = 0
+levelBar.ZIndex = 12
+levelBar.Parent = frame
+
+local lbc = Instance.new("UICorner")
+lbc.CornerRadius = UDim.new(0, 4)
+lbc.Parent = levelBar
+
+local function makeLevelBtn(text, level, xOff, w)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, 14)
+    b.Position = UDim2.new(0, xOff, 0, 2)
+    b.BackgroundColor3 = (level == "medium") and Color3.fromRGB(60, 130, 220) or Color3.fromRGB(40, 50, 70)
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(230, 235, 250)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 7
+    b.BorderSizePixel = 0
+    b.ZIndex = 13
+    b.Parent = levelBar
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 3)
+    c.Parent = b
+    b.MouseButton1Click:Connect(function()
+        curLevel = level
+        for _, child in ipairs(levelBar:GetChildren()) do
+            if child:IsA("TextButton") then child.BackgroundColor3 = Color3.fromRGB(40, 50, 70) end
+        end
+        b.BackgroundColor3 = Color3.fromRGB(60, 130, 220)
+    end)
+    return b
+end
+
+makeLevelBtn("低", "low", 2, 85)
+makeLevelBtn("中", "medium", 89, 95)
+makeLevelBtn("高", "high", 186, 86)
+
+local function makeBtn(text, x, y, w, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, 18)
+    b.Position = UDim2.new(0, x, 0, y)
+    b.BackgroundColor3 = color
+    b.BackgroundTransparency = 0.15
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 8
+    b.BorderSizePixel = 0
+    b.ZIndex = 12
+    b.Parent = frame
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 4)
+    c.Parent = b
+    return b
+end
+
+local btnObf  = makeBtn("混淆", 6,   134, 90,  Color3.fromRGB(60, 130, 220))
+local btnCopy = makeBtn("复制", 100, 134, 78,  Color3.fromRGB(60, 160, 110))
+local btnClr  = makeBtn("清空", 182, 134, 92,  Color3.fromRGB(160, 70, 80))
+
+local output = Instance.new("TextBox")
+output.Size = UDim2.new(1, -12, 0, 78)
+output.Position = UDim2.new(0, 6, 0, 156)
+output.BackgroundColor3 = Color3.fromRGB(12, 14, 20)
+output.BackgroundTransparency = 0.25
+output.BorderSizePixel = 0
+output.Text = ""
+output.TextColor3 = Color3.fromRGB(180, 220, 200)
+output.Font = Enum.Font.Code
+output.TextSize = 8
+output.TextXAlignment = Enum.TextXAlignment.Left
+output.TextYAlignment = Enum.TextYAlignment.Top
+output.ClearTextOnFocus = false
+output.MultiLine = true
+output.TextWrapped = true
+output.TextEditable = true
+output.ZIndex = 12
+output.Parent = frame
+
+local oc = Instance.new("UICorner")
+oc.CornerRadius = UDim.new(0, 4)
+oc.Parent = output
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -12, 0, 12)
+status.Position = UDim2.new(0, 6, 1, -14)
+status.BackgroundTransparency = 1
+status.Text = "就绪 · FCS 融合版"
+status.TextColor3 = Color3.fromRGB(140, 190, 150)
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Font = Enum.Font.Gotham
+status.TextSize = 7
+status.ZIndex = 12
+status.Parent = frame
+
+local lastFullOutput = ""
+
+local UIS = game:GetService("UserInputService")
+local dragging, dragStart, startPos = false, nil, nil
+
+title.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = inp.Position; startPos = frame.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(inp)
+    if not dragging then return end
+    if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
+        local d = inp.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    end
+end)
+
+UIS.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+btnObf.MouseButton1Click:Connect(function()
+    print("======= XDG v18.6 FCS mode="..curMode.." report="..curReport.." level="..curLevel.." =======")
+    local src = input.Text
+    if src == nil or src == "" then
+        status.Text = "输入为空"
+        status.TextColor3 = Color3.fromRGB(220, 160, 80)
+        return
+    end
+    status.Text = "混淆中……（FCS 12 层）"
+    status.TextColor3 = Color3.fromRGB(200, 200, 120)
+    task.wait()
+
+    local t0 = tick and tick() or os.clock()
+    local ok, out, err = pcall(obfuscate, src, {
+        level = curLevel,
+        mode = curMode,
+        report = curReport,
+    })
+    if ok and type(out) == "table" then
+        local r, e = out[1], out[2]
+        if r == nil then ok = false; out = e else out = r end
+    elseif ok and out == nil then
+        ok = false; out = err or "unknown"
+    end
+    local dt = (tick and tick() or os.clock()) - t0
+
+    if not ok or type(out) ~= "string" then
+        output.Text = "失败: " .. tostring(out)
+        status.Text = "失败"
+        status.TextColor3 = Color3.fromRGB(220, 100, 100)
+        print("[XDG] 混淆失败:", out)
+        return
+    end
+
+    print(string.format("[XDG] 成功，%d 字节，%.2fs", #out, dt))
+    lastFullOutput = out
+
+    local path, err2 = saveToFile(out)
+    if path then
+        output.Text = string.format("[OK] %d字节 %s/%s/%s %.2fs\n%s\n\n%s", #out, curMode, curReport, curLevel, dt, path, out:sub(1, 200).."\n...")
+        status.Text = "✓ 已保存"
+        status.TextColor3 = Color3.fromRGB(140, 220, 150)
+    else
+        output.Text = out
+        status.Text = "✓ 完成"
+        status.TextColor3 = Color3.fromRGB(220, 160, 80)
+    end
+end)
+
+btnCopy.MouseButton1Click:Connect(function()
+    local s = lastFullOutput
+    if s == nil or s == "" then s = output.Text end
+    if s == nil or s == "" then status.Text = "空"; return end
+    if type(setclipboard) == "function" then
+        local ok = pcall(setclipboard, s)
+        if ok then
+            status.Text = "✓ 已复制 "..#s
+            status.TextColor3 = Color3.fromRGB(140, 220, 150)
+            return
+        end
+    end
+    output.Text = s
+    output:CaptureFocus()
+    output.CursorPosition = #s + 1
+    output.SelectionStart = 1
+    status.Text = "请 Ctrl+C"
+end)
+
+btnClr.MouseButton1Click:Connect(function()
+    input.Text = ""
+    output.Text = ""
+    lastFullOutput = ""
+    status.Text = "已清空"
+    status.TextColor3 = Color3.fromRGB(150, 165, 190)
+end)
+
+print("[XDG] v18.6 FCS 融合版加载完成 · 窗口已显示")
