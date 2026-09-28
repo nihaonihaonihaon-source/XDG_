@@ -7,6 +7,8 @@ local has_getconnections = type(getconnections) == "function"
 local has_newcclosure = type(newcclosure) == "function"
 local has_getnamecallmethod = type(getnamecallmethod) == "function"
 local has_getgc = type(getgc) == "function"
+local has_hookmetamethod = type(hookmetamethod) == "function"
+local has_firetouchinterest = type(firetouchinterest) == "function"
 local genv = has_getgenv and getgenv() or _G
 if genv.XDG_UI_Loaded then
     pcall(function()
@@ -821,8 +823,13 @@ local STOP_THRESHOLD = 0.01
 local COLLISION_TOLERANCE = 0.15
 local COLLISION_SLOW_FACTOR = 0.35
 local COLLISION_DURATION = 0.3
+local TELEPORT_DISTANCE = 200
+local TELEPORT_WINDOW = 0.5
+local RESYNC_COOLDOWN = 1
+local STUCK_FRAMES = 15
 local lastCollisionTime = 0
 local currentSpeedMultiplier = 1
+local isGrounded = true
 local currentHumanoid = nil
 local currentRoot = nil
 local velocityForce = nil
@@ -830,6 +837,10 @@ local velocityAttachment = nil
 local hookInstalled = false
 local lastMoveDir = Vector3.zero
 local desiredVelocity = Vector3.zero
+local lastPos = Vector3.zero
+local lastPosTime = 0
+local zeroFrames = 0
+local lastResync = 0
 local function clearVelocity()
     if velocityForce then
         pcall(function()
@@ -869,9 +880,12 @@ end
 local BYPASS = {
     enabled = true,
     spoofed = { WalkSpeed = 16, JumpPower = 50, JumpHeight = 7.2, HipHeight = 2 },
-    keywords = { "anticheat", "anti_cheat", "ac_", "speedcheck", "report", "detect", "kick", "ban", "hack", "velocity", "bodyvelocity", "linearvelocity", "bodyforce", "move", "position", "warp", "teleport" },
-    blockedRemotes = {},
-    blockedConnections = {},
+    keywords = {
+        "anticheat", "anti_cheat", "ac_", "speedcheck", "report", "detect", "kick", "ban",
+        "hack", "velocity", "bodyvelocity", "linearvelocity", "bodyforce",
+        "move", "position", "warp", "teleport", "movement", "check",
+        "exploit", "suspicious", "violation", "violate",
+    },
 }
 local function isSuspiciousName(name)
     if not name then return false end
@@ -899,11 +913,22 @@ local function installHook()
             if currentHumanoid and t == currentHumanoid and BYPASS.spoofed[k] then
                 return BYPASS.spoofed[k]
             end
+            if currentRoot and t == currentRoot and (k == "AssemblyLinearVelocity" or k == "Velocity") then
+                local realVel = oldIndex(t, k)
+                if IS_SPEEDING and currentHumanoid and currentHumanoid.MoveDirection.Magnitude > 0.1 then
+                    local fakeVel = currentHumanoid.MoveDirection.Unit * 16
+                    return Vector3.new(fakeVel.X, realVel.Y, fakeVel.Z)
+                end
+                return realVel
+            end
             return oldIndex(t, k)
         end
         local fnNew = function(t, k, v)
             if currentHumanoid and t == currentHumanoid and BYPASS.spoofed[k] then
                 return
+            end
+            if currentRoot and t == currentRoot and (k == "AssemblyLinearVelocity" or k == "Velocity") then
+                if IS_SPEEDING then return end
             end
             return oldNewIndex(t, k, v)
         end
@@ -923,7 +948,10 @@ local function installHook()
                     local args = { ... }
                     for _, arg in ipairs(args) do
                         if type(arg) == "table" then
-                            if arg.speed or arg.walkspeed or arg.velocity or arg.pos or arg.position then return end
+                            if arg.speed or arg.walkspeed or arg.velocity or arg.pos or arg.position
+                               or arg.movement or arg.move or arg.offset then return end
+                        elseif type(arg) == "Vector3" then
+                            if arg.Magnitude > 50 then return end
                         end
                     end
                 end
@@ -941,20 +969,28 @@ local function installHook()
 end
 local function severRemotes()
     if not has_getconnections then return end
-    local roots = { game:GetService("ReplicatedStorage"), game:GetService("ReplicatedFirst"), LP, LP:FindFirstChild("PlayerScripts"), game:GetService("StarterPlayer") }
+    local roots = {
+        game:GetService("ReplicatedStorage"),
+        game:GetService("ReplicatedFirst"),
+        LP,
+        LP:FindFirstChild("PlayerScripts"),
+        game:GetService("StarterPlayer"),
+        workspace,
+    }
     for _, root in ipairs(roots) do
         if root then
             local ok, desc = pcall(function() return root:GetDescendants() end)
             if ok and type(desc) == "table" then
                 for _, obj in ipairs(desc) do
-                    local okISA = pcall(function() return obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableEvent") end)
+                    local okISA = pcall(function()
+                        return obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableEvent") or obj:IsA("BindableFunction")
+                    end)
                     if okISA and isAntiCheatRelated(obj) then
-                        for _, ev in ipairs({ "OnClientEvent", "OnServerEvent", "Event" }) do
+                        for _, ev in ipairs({ "OnClientEvent", "OnServerEvent", "Event", "Invoke" }) do
                             local okc, cons = pcall(function() return getconnections(obj[ev]) end)
                             if okc and type(cons) == "table" then
                                 for _, c in ipairs(cons) do
                                     pcall(function() c:Disconnect() end)
-                                    table.insert(BYPASS.blockedConnections, c)
                                 end
                             end
                         end
@@ -1032,6 +1068,22 @@ local function hideFromDebug()
         end
         debug.getinfo = fn
     end)
+    pcall(function()
+        local oldTraceback = debug.traceback
+        if type(oldTraceback) ~= "function" then return end
+        local fn = function(...)
+            local info = oldTraceback(...)
+            if type(info) == "string" then
+                info = info:gsub("XDG[%w_]*", "Core")
+            end
+            return info
+        end
+        if has_newcclosure then
+            local ok, w = pcall(function() return newcclosure(fn) end)
+            if ok and type(w) == "function" then fn = w end
+        end
+        debug.traceback = fn
+    end)
 end
 local function createVelocity()
     if not currentRoot or not currentRoot.Parent then return end
@@ -1087,6 +1139,24 @@ local function stopSpeed()
     freezeCharacter()
     applyWalkSpeed(16)
 end
+local function resyncAll()
+    local now = tick()
+    if now - lastResync < RESYNC_COOLDOWN then return end
+    lastResync = now
+    hookInstalled = false
+    clearVelocity()
+    task.defer(function()
+        pcall(function()
+            if currentHumanoid and currentRoot then
+                installHook()
+                if IS_SPEEDING then
+                    createVelocity()
+                    applyWalkSpeed(0)
+                end
+            end
+        end)
+    end)
+end
 RunService.PreSimulation:Connect(function()
     pcall(function()
         if not currentHumanoid or not currentHumanoid.Parent or not currentRoot or not currentRoot.Parent then
@@ -1098,13 +1168,32 @@ RunService.PreSimulation:Connect(function()
             if velocityForce and velocityForce.Parent then clearVelocity() end
             return
         end
+        local state = currentHumanoid:GetState()
+        local grounded = (state == Enum.HumanoidStateType.Running
+                       or state == Enum.HumanoidStateType.RunningNoPhysics
+                       or state == Enum.HumanoidStateType.Landed
+                       or state == Enum.HumanoidStateType.Seated)
+        isGrounded = grounded
         local now = tick()
-        if now - lastCollisionTime < COLLISION_DURATION then
+        if isGrounded and (now - lastCollisionTime) < COLLISION_DURATION then
             currentSpeedMultiplier = COLLISION_SLOW_FACTOR
         else
             currentSpeedMultiplier = 1
         end
         local mv = currentHumanoid.MoveDirection
+        if mv.Magnitude > STOP_THRESHOLD then
+            lastMoveDir = mv.Unit
+        end
+        if not isGrounded then
+            if velocityForce and velocityForce.Parent then
+                local realTarget = REAL_SPEED_BASE * (UI_SPEED / 200) * currentSpeedMultiplier
+                if realTarget <= 16 then realTarget = UI_SPEED end
+                if velocityForce:IsA("LinearVelocity") then
+                    velocityForce.VectorVelocity = Vector3.new(lastMoveDir.X * realTarget, 0, lastMoveDir.Z * realTarget)
+                end
+            end
+            return
+        end
         if mv.Magnitude > STOP_THRESHOLD then
             lastMoveDir = mv.Unit
         else
@@ -1118,7 +1207,6 @@ RunService.PreSimulation:Connect(function()
             end
             pcall(function()
                 currentRoot.AssemblyLinearVelocity = Vector3.new(0, currentRoot.AssemblyLinearVelocity.Y, 0)
-                currentRoot.AssemblyAngularVelocity = Vector3.zero
             end)
             return
         end
@@ -1142,6 +1230,7 @@ RunService.PostSimulation:Connect(function()
     pcall(function()
         if not IS_SPEEDING then return end
         if not currentRoot or not currentRoot.Parent then return end
+        if not isGrounded then return end
         local actual = currentRoot.AssemblyLinearVelocity
         local dx = actual.X - desiredVelocity.X
         local dz = actual.Z - desiredVelocity.Z
@@ -1151,9 +1240,35 @@ RunService.PostSimulation:Connect(function()
             currentRoot.AssemblyLinearVelocity = Vector3.new(desiredVelocity.X, actual.Y, desiredVelocity.Z)
         end
         local angVel = currentRoot.AssemblyAngularVelocity
-        if math.abs(angVel.Y) > 1 or math.abs(angVel.X) > 1 or math.abs(angVel.Z) > 1 then
+        if math.abs(angVel.Y) > 3 or math.abs(angVel.X) > 3 or math.abs(angVel.Z) > 3 then
             currentRoot.AssemblyAngularVelocity = Vector3.zero
         end
+    end)
+end)
+RunService.Heartbeat:Connect(function()
+    pcall(function()
+        if not currentHumanoid or not currentHumanoid.Parent or not currentRoot or not currentRoot.Parent then return end
+        if not IS_SPEEDING then return end
+        local now = tick()
+        local pos = currentRoot.Position
+        local dist = (pos - lastPos).Magnitude
+        local teleported = (dist > TELEPORT_DISTANCE and (now - lastPosTime) < TELEPORT_WINDOW)
+        local wsReset = (currentHumanoid.WalkSpeed > 1)
+        local velStuck = false
+        if currentRoot.AssemblyLinearVelocity.Magnitude < 0.1 and currentHumanoid.MoveDirection.Magnitude > 0.1 then
+            zeroFrames = zeroFrames + 1
+            if zeroFrames > STUCK_FRAMES then
+                velStuck = true
+                zeroFrames = 0
+            end
+        else
+            zeroFrames = 0
+        end
+        if teleported or wsReset or velStuck then
+            resyncAll()
+        end
+        lastPos = pos
+        lastPosTime = now
     end)
 end)
 RunService.RenderStepped:Connect(function()
@@ -1185,6 +1300,9 @@ local function bindChar(char)
             currentHumanoid = hum
             currentRoot = root
             hookInstalled = false
+            lastPos = root.Position
+            lastPosTime = tick()
+            zeroFrames = 0
             installHook()
             startAntiCheatScriptMonitor()
             installGCHiding()
