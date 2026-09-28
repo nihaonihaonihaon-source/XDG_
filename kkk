@@ -490,9 +490,9 @@ GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
 -- ============================================================
--- 加速功能（内联，不读远程）—— 30Hz + 每帧 20 格
--- 加速方式：默认 CFrame；可切换 Translate（见 ACCEL_MODE）
--- 新增：速度监听拦截加强 + 死亡禁用 + 反拉回
+-- 加速功能（内联，不读远程）
+-- 速度反作弊绕过：AssemblyLinearVelocity 持续推力 + 位移突变放弃
+-- 新增：跳跃修复 + 反拉回 + 多层死亡禁用
 -- ============================================================
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
@@ -507,7 +507,6 @@ local STOP2=0.01
 local MAX_STEP2=20
 local OFFSET2=0.3
 local BASE_RATE2=1/30
-local ACCEL_MODE="CFrame"  -- 可选 "CFrame" 或 "Translate"
 local SP2=false
 local US2=16
 local CH2=nil
@@ -522,6 +521,7 @@ local SPF2={WalkSpeed=16,HipHeight=2}
 local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
 local deathConns={}
+local VELOCITY_MUTATION_LIMIT=3000
 
 -- 反拉回：位置历史
 local POS_HISTORY={}
@@ -549,7 +549,6 @@ local function setupDeathBlock()
     end
     deathConns={}
 
-    -- 1. 禁用 Died 事件的所有连接
     if t2.gc then
         local ok,conns=pcall(function() return t2.gc(CH2.Died) end)
         if ok and conns then
@@ -559,7 +558,6 @@ local function setupDeathBlock()
         end
     end
 
-    -- 2. 每帧锁 Health
     table.insert(deathConns, R2.Heartbeat:Connect(function()
         if not deathBlocked then return end
         if not CH2 or not CH2.Parent then return end
@@ -570,7 +568,6 @@ local function setupDeathBlock()
         end)
     end))
 
-    -- 3. 拦截 TakeDamage
     if hookmetamethod and newcclosure then
         pcall(function()
             local mt = getrawmetatable(game)
@@ -772,39 +769,34 @@ local function HD2()
         end
     end)
 end
-local function TP2()
+
+-- 速度反作弊绕过：持续推力 + 位移突变放弃
+local function pushSpeed()
     if not CR2 or not CR2.Parent then return end
     if not CH2 or not CH2.Parent then return end
     if CH2.FloorMaterial==Enum.Material.Air then return end
+
     local mv=CH2.MoveDirection
     if mv.Magnitude<STOP2 then return end
     if not IG2()then return end
-    local rs=RS2()
-    if rs<=16 then return end
-    local now=tick()
-    if now<NEXT_T2 then return end
-    local dt=now-LAST_T2
-    if dt<=0 then dt=BASE_RATE2 end
-    if dt>0.1 then dt=0.1 end
-    LAST_T2=now
-    NEXT_T2=now+BASE_RATE2
-    local dist=rs*dt
-    if dist>MAX_STEP2 then dist=MAX_STEP2 end
-    PHASE2=PHASE2+dt*30
-    local jx=(math.sin(PHASE2)+math.sin(PHASE2*2.3))*0.5*OFFSET2
-    local jz=(math.cos(PHASE2*1.7)+math.cos(PHASE2*3.1))*0.5*OFFSET2
-    local d=mv.Unit
-    local off=Vector3.new(d.X*dist+jx,0,d.Z*dist+jz)
+
+    local target=RS2()
+    if target<=16 then return end
+
+    local dir=Vector3.new(mv.X,0,mv.Z).Unit
+    local cur=CR2.AssemblyLinearVelocity
+    local goal=Vector3.new(dir.X*target,cur.Y,dir.Z*target)
+
+    -- 位移突变检测：和当前速度差太多就放弃这一帧
+    local delta=(goal-cur).Magnitude
+    if delta>VELOCITY_MUTATION_LIMIT then return end
+
     pcall(function()
-        if ACCEL_MODE=="Translate" then
-            CR2:TranslateBy(off)
-        else
-            local cur=CR2.CFrame
-            local pos=cur.Position+off
-            CR2.CFrame=CFrame.new(pos,pos+Vector3.new(d.X,0,d.Z))
-        end
+        CR2.AssemblyLinearVelocity=goal
+        CR2.AssemblyAngularVelocity=Vector3.zero
     end)
 end
+
 local function BC2(ch)
     if not ch then return end
     task.spawn(function()
@@ -835,8 +827,7 @@ R2.Heartbeat:Connect(function()
         updateDeathBlock()
         updatePosHistory()
         detectLagBack()
-        if CH2.MoveDirection.Magnitude<STOP2 then return end
-        TP2()
+        pushSpeed()
     end)
 end)
 task.spawn(function()pcall(SR2)end)
