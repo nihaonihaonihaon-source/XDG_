@@ -517,8 +517,11 @@ local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
 local deathConns={}
 local VELOCITY_MUTATION_LIMIT=3000
-local SMOOTH_VEL=0
-local SMOOTH_ACCEL=60
+
+local POS_HISTORY={}
+local HISTORY_SIZE=3
+local LAG_BACK_DIST=5
+local LAG_BACK_DOT=-0.5
 
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
 local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction"}
@@ -530,22 +533,6 @@ local function IG2()
     local ok,st=pcall(function()return CH2:GetState()end)
     if not ok or not st then return false end
     return st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.RunningNoPhysics or st==Enum.HumanoidStateType.Landed or st==Enum.HumanoidStateType.Seated
-end
-
-local function isSensitive()
-    if not CH2 or not CH2.Parent then return true end
-    if CH2.FloorMaterial==Enum.Material.Air then return true end
-    local ok,st=pcall(function()return CH2:GetState()end)
-    if ok and st then
-        if st==Enum.HumanoidStateType.Physics
-            or st==Enum.HumanoidStateType.Ragdoll
-            or st==Enum.HumanoidStateType.FallingDown
-            or st==Enum.HumanoidStateType.PlatformStanding then
-            return true
-        end
-    end
-    if CH2.Sit or CH2.PlatformStand then return true end
-    return false
 end
 
 local function setupDeathBlock()
@@ -597,6 +584,38 @@ local function updateDeathBlock()
     if not SP2 then deathBlocked=false return end
     if US2<=DEATH_BLOCK_THRESHOLD then deathBlocked=false return end
     deathBlocked=true
+end
+
+local function updatePosHistory()
+    if not CR2 or not CR2.Parent then return end
+    table.insert(POS_HISTORY,1,CR2.CFrame)
+    while #POS_HISTORY>HISTORY_SIZE do
+        table.remove(POS_HISTORY)
+    end
+end
+
+local function detectLagBack()
+    if not CR2 or not CR2.Parent then return end
+    if not CH2 or not CH2.Parent then return end
+    if #POS_HISTORY<2 then return end
+
+    local cur=CR2.Position
+    local prev=POS_HISTORY[1].Position
+    local delta=cur-prev
+    local dist=delta.Magnitude
+    if dist<LAG_BACK_DIST then return end
+
+    local mv=CH2.MoveDirection
+    if mv.Magnitude<0.1 then return end
+
+    local dot=delta.Unit:Dot(mv.Unit)
+    if dot<LAG_BACK_DOT then
+        if POS_HISTORY[2] then
+            pcall(function()
+                CR2.CFrame=POS_HISTORY[2]
+            end)
+        end
+    end
 end
 
 local function killSpeedListeners()
@@ -742,37 +761,21 @@ local function HD2()
     end)
 end
 
-local function pushSpeed(dt)
-    if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
-    if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
-
-    if isSensitive() then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
+local function pushSpeed()
+    if not CR2 or not CR2.Parent then return end
+    if not CH2 or not CH2.Parent then return end
+    if CH2.FloorMaterial==Enum.Material.Air then return end
 
     local mv=CH2.MoveDirection
-    if mv.Magnitude<STOP2 then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
+    if mv.Magnitude<STOP2 then return end
+    if not IG2()then return end
 
     local target=RS2()
-    if target<=16 then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
-
-    local step=SMOOTH_ACCEL*math.max(dt,0.001)
-    if SMOOTH_VEL<target then
-        SMOOTH_VEL=math.min(target,SMOOTH_VEL+step)
-    elseif SMOOTH_VEL>target then
-        SMOOTH_VEL=math.max(target,SMOOTH_VEL-step)
-    end
+    if target<=16 then return end
 
     local dir=Vector3.new(mv.X,0,mv.Z).Unit
     local cur=CR2.AssemblyLinearVelocity
-    local goal=Vector3.new(dir.X*SMOOTH_VEL,cur.Y,dir.Z*SMOOTH_VEL)
+    local goal=Vector3.new(dir.X*target,cur.Y,dir.Z*target)
 
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
@@ -792,7 +795,7 @@ local function BC2(ch)
             HI2=false
             LAST_T2=tick()
             NEXT_T2=LAST_T2
-            SMOOTH_VEL=0
+            POS_HISTORY={}
             IH2()
             SM2()
             HD2()
@@ -804,14 +807,16 @@ end
 if L2.Character then BC2(L2.Character)end
 L2.CharacterAdded:Connect(BC2)
 
-R2.Heartbeat:Connect(function(dt)
+R2.Heartbeat:Connect(function()
     pcall(function()
         if not VERIFY2()then HI2=false task.spawn(function()pcall(IH2)end)end
-        if not SP2 then SMOOTH_VEL=0 return end
-        if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
-        if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
+        if not SP2 then return end
+        if not CH2 or not CH2.Parent then return end
+        if not CR2 or not CR2.Parent then return end
         updateDeathBlock()
-        pushSpeed(dt)
+        updatePosHistory()
+        detectLagBack()
+        pushSpeed()
     end)
 end)
 task.spawn(function()pcall(SR2)end)
@@ -821,15 +826,12 @@ local function SS2(v)
     v=math.clamp(math.floor(v+0.5),UI_MIN2,UI_MAX2)
     US2=v
     SP2=US2>16
-    if not SP2 then
-        SMOOTH_VEL=0
-        if CR2 and CR2.Parent then
-            pcall(function()
-                local v0=CR2.AssemblyLinearVelocity
-                CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
-                CR2.AssemblyAngularVelocity=Vector3.zero
-            end)
-        end
+    if not SP2 and CR2 and CR2.Parent then
+        pcall(function()
+            local v0=CR2.AssemblyLinearVelocity
+            CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
+            CR2.AssemblyAngularVelocity=Vector3.zero
+        end)
     end
 end
 
