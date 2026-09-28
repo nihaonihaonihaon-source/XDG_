@@ -491,6 +491,7 @@ GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,
 
 -- ============================================================
 -- 加速功能（内联，不读远程）—— 方案 A：90Hz + MAX_STEP2=11.11
+-- 新增：跳跃修复 + 反拉回（两帧历史回退）
 -- ============================================================
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
@@ -516,6 +517,15 @@ local ORI2={}
 local ORIGINAL2={}
 local PHASE2=0
 local SPF2={WalkSpeed=16,HipHeight=2}
+local DEATH_BLOCK_THRESHOLD=16
+local deathBlocked=false
+
+-- 反拉回：位置历史
+local POS_HISTORY={}
+local HISTORY_SIZE=3
+local LAG_BACK_DIST=5
+local LAG_BACK_DOT=-0.5
+
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
 local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction"}
 local function SU2(n)if not n then return false end local l=string.lower(tostring(n))for _,k in ipairs(KW2)do if l:find(k,1,true)then return true end end return false end
@@ -527,6 +537,55 @@ local function IG2()
     if not ok or not st then return false end
     return st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.RunningNoPhysics or st==Enum.HumanoidStateType.Landed or st==Enum.HumanoidStateType.Seated
 end
+
+-- 死亡禁用：速度超过阈值时每帧回满血
+local function updateDeathBlock()
+    if not SP2 then deathBlocked=false return end
+    if US2<=DEATH_BLOCK_THRESHOLD then deathBlocked=false return end
+    deathBlocked=true
+    if CH2 and CH2.Parent then
+        pcall(function()
+            if CH2.Health<CH2.MaxHealth then
+                CH2.Health=CH2.MaxHealth
+            end
+        end)
+    end
+end
+
+-- 反拉回：记录历史 + 检测反向跳变
+local function updatePosHistory()
+    if not CR2 or not CR2.Parent then return end
+    table.insert(POS_HISTORY,1,CR2.CFrame)
+    while #POS_HISTORY>HISTORY_SIZE do
+        table.remove(POS_HISTORY)
+    end
+end
+
+local function detectLagBack()
+    if not CR2 or not CR2.Parent then return end
+    if not CH2 or not CH2.Parent then return end
+    if #POS_HISTORY<2 then return end
+
+    local cur=CR2.Position
+    local prev=POS_HISTORY[1].Position
+    local delta=cur-prev
+    local dist=delta.Magnitude
+    if dist<LAG_BACK_DIST then return end
+
+    local mv=CH2.MoveDirection
+    if mv.Magnitude<0.1 then return end
+
+    local dot=delta.Unit:Dot(mv.Unit)
+    if dot<LAG_BACK_DOT then
+        -- 检测到反向跳变：回退到两帧前
+        if POS_HISTORY[2] then
+            pcall(function()
+                CR2.CFrame=POS_HISTORY[2]
+            end)
+        end
+    end
+end
+
 local function IH2()
     if HI2 then return end
     if not(A2.g and A2.sr)then return end
@@ -651,6 +710,10 @@ end
 local function TP2()
     if not CR2 or not CR2.Parent then return end
     if not CH2 or not CH2.Parent then return end
+
+    -- 跳跃修复：空中时不做 CFrame 改写
+    if CH2.FloorMaterial==Enum.Material.Air then return end
+
     local mv=CH2.MoveDirection
     if mv.Magnitude<STOP2 then return end
     if not IG2()then return end
@@ -685,6 +748,7 @@ local function BC2(ch)
             HI2=false
             LAST_T2=tick()
             NEXT_T2=LAST_T2
+            POS_HISTORY={}
             IH2()
             SM2()
             HD2()
@@ -693,12 +757,16 @@ local function BC2(ch)
 end
 if L2.Character then BC2(L2.Character)end
 L2.CharacterAdded:Connect(BC2)
+
 R2.Heartbeat:Connect(function()
     pcall(function()
         if not VERIFY2()then HI2=false task.spawn(function()pcall(IH2)end)end
         if not SP2 then return end
         if not CH2 or not CH2.Parent then return end
         if not CR2 or not CR2.Parent then return end
+        updateDeathBlock()
+        updatePosHistory()
+        detectLagBack()
         if CH2.MoveDirection.Magnitude<STOP2 then return end
         TP2()
     end)
