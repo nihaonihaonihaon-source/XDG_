@@ -498,6 +498,7 @@ for k,v in pairs(t2)do A2[k]=type(v)=="function"end
 local UI_MIN2,UI_MAX2=1,200
 local MUL2=9
 local STOP2=0.01
+local MAX_STEP2=4
 local VELOCITY_MUTATION_LIMIT=3000
 local SMOOTH_VEL=0
 local SMOOTH_ACCEL=60
@@ -518,15 +519,17 @@ local deathBlocked=false
 local deathConns={}
 local lastPos=nil
 local lagBackUntil=0
-
-local POS_HISTORY={}
-local HISTORY_SIZE=2
+local lastPushed=0
+local promptOriginal={}
+local trapOriginal={}
+local trapConns={}
+local humanoidSwap={}
 
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
 local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction"}
 local function SU2(n)if not n then return false end local l=string.lower(tostring(n))for _,k in ipairs(KW2)do if l:find(k,1,true)then return true end end return false end
 local function SA2(o)if not o or not o.Name then return false end return SU2(o.Name)end
-local function RS2()return US2*MUL2 end
+local function RS2()return math.min(US2*MUL2,MAX_STEP2*60) end
 local function IG2()
     if not CH2 then return false end
     local ok,st=pcall(function()return CH2:GetState()end)
@@ -548,6 +551,11 @@ local function isSensitive()
     end
     if CH2.Sit or CH2.PlatformStand then return true end
     if os.clock()<lagBackUntil then return true end
+    local num=tonumber(L2:GetAttribute("RagdollEndTime"))
+    if num and num>workspace:GetServerTimeNow() then
+        lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
+        return true
+    end
     return false
 end
 
@@ -558,15 +566,11 @@ local function detectLagBack()
     local mv=CH2.MoveDirection
     if not lastPos then
         lastPos=cur
-        table.insert(POS_HISTORY,1,CR2.CFrame)
-        while #POS_HISTORY>HISTORY_SIZE do table.remove(POS_HISTORY) end
         return
     end
     local delta=cur-lastPos
     local dist=delta.Magnitude
     lastPos=cur
-    table.insert(POS_HISTORY,1,CR2.CFrame)
-    while #POS_HISTORY>HISTORY_SIZE do table.remove(POS_HISTORY) end
     if dist<LAG_BACK_DIST then return end
     if mv.Magnitude<0.1 then return end
     local dot=delta.Unit:Dot(mv.Unit)
@@ -579,6 +583,71 @@ local function detectLagBack()
             CR2.AssemblyAngularVelocity=Vector3.zero
         end)
     end
+end
+
+local function freezeHumanoidState(hum)
+    if not hum or not hum.Parent then return end
+    pcall(function() hum.BreakJointsOnDeath=false end)
+    pcall(function() hum.RequiresNeck=false end)
+    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false) end)
+    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,false) end)
+    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown,false) end)
+    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Physics,false) end)
+end
+
+local function humanoidSwapOn(hum,char)
+    if humanoidSwap.clone then return end
+    if not hum or not char then return end
+    pcall(function()
+        local clone=hum:Clone()
+        hum.Parent=nil
+        clone.Parent=char
+        workspace.CurrentCamera.CameraSubject=clone
+        humanoidSwap.original=hum
+        humanoidSwap.clone=clone
+    end)
+end
+
+local function humanoidSwapOff(char)
+    if not humanoidSwap.clone then return end
+    pcall(function()
+        local orig=humanoidSwap.original
+        local clone=humanoidSwap.clone
+        if orig and clone and char and orig.Parent==nil and clone.Parent==char then
+            orig.Parent=char
+            workspace.CurrentCamera.CameraSubject=orig
+            clone:Destroy()
+        end
+    end)
+    humanoidSwap.original=nil
+    humanoidSwap.clone=nil
+end
+
+local function disableUGI()
+    if not t2.gc then return end
+    for _,sig in ipairs({R2.Heartbeat,R2.PreSimulation,R2.PostSimulation}) do
+        local ok,conns=pcall(function() return t2.gc(sig) end)
+        if ok and conns then
+            for _,conn in ipairs(conns) do
+                pcall(function()
+                    local info=debug.info(conn.Function,"s")
+                    if info and tostring(info):find("UGI",1,true) then
+                        conn:Disable()
+                    end
+                end)
+            end
+        end
+    end
+end
+
+local function blockDeathReplication(hum)
+    if type(replicatesignal)~="function" then return end
+    if not hum then return end
+    pcall(function()
+        for i=1,2 do
+            replicatesignal(hum.ServerBreakJoints)
+        end
+    end)
 end
 
 local function setupDeathBlock()
@@ -599,12 +668,14 @@ local function setupDeathBlock()
 
     table.insert(deathConns, R2.Heartbeat:Connect(function()
         if not deathBlocked then return end
+        if os.clock()<lagBackUntil then return end
         if not CH2 or not CH2.Parent then return end
         pcall(function()
             if CH2.Health < CH2.MaxHealth then
                 CH2.Health = CH2.MaxHealth
             end
         end)
+        freezeHumanoidState(CH2)
     end))
 
     if hookmetamethod and newcclosure then
@@ -624,6 +695,8 @@ local function setupDeathBlock()
             end
         end)
     end
+
+    blockDeathReplication(CH2)
 end
 
 local function updateDeathBlock()
@@ -634,8 +707,8 @@ end
 
 local function killSpeedListeners()
     if not t2.gc then return end
-    local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity","WalkSpeed"}
-    local targets = {CR2, CH2}
+    local props = {"CFrame","Position"}
+    local targets = {CR2}
     for _, obj in ipairs(targets) do
         if obj and obj.Parent then
             for _, prop in ipairs(props) do
@@ -648,6 +721,51 @@ local function killSpeedListeners()
             end
         end
     end
+end
+
+local function makePromptsInstant()
+    pcall(function()
+        local prompt=ProximityPromptService
+        local function applyPrompt(p)
+            if not p or not p:IsA("ProximityPrompt") then return end
+            if promptOriginal[p]==nil then
+                promptOriginal[p]=p.HoldDuration
+            end
+            if p.HoldDuration~=0 then
+                pcall(function() p.HoldDuration=0 end)
+            end
+        end
+        for _,obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") then applyPrompt(obj) end
+        end
+        workspace.DescendantAdded:Connect(function(obj)
+            if obj:IsA("ProximityPrompt") then task.defer(applyPrompt,obj) end
+        end)
+    end)
+end
+
+local function setupAntiTrap()
+    if not t2.gc then return end
+    for _,c in ipairs(trapConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    trapConns={}
+    local function applyPart(p)
+        if p and p:IsA("BasePart") and trapOriginal[p]==nil then
+            trapOriginal[p]=p.CanTouch
+            pcall(function() p.CanTouch=false end)
+        end
+    end
+    for _,obj in ipairs(CollectionService:GetTagged("PlacedTrap")) do
+        applyPart(obj)
+        for _,d in ipairs(obj:GetDescendants()) do applyPart(d) end
+    end
+    table.insert(trapConns,CollectionService:GetInstanceAddedSignal("PlacedTrap"):Connect(function(obj)
+        task.defer(function()
+            applyPart(obj)
+            for _,d in ipairs(obj:GetDescendants()) do applyPart(d) end
+        end)
+    end))
 end
 
 local function IH2()
@@ -784,6 +902,11 @@ local function pushSpeed(dt)
         return
     end
 
+    if not IG2() then
+        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
+        return
+    end
+
     local mv=CH2.MoveDirection
     if mv.Magnitude<STOP2 then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
@@ -803,13 +926,17 @@ local function pushSpeed(dt)
         SMOOTH_VEL=math.max(target,SMOOTH_VEL-step)
     end
 
+    local jitter=1+(math.random()-0.5)*0.1
+    local vel=SMOOTH_VEL*jitter
+
     local dir=Vector3.new(mv.X,0,mv.Z).Unit
     local cur=CR2.AssemblyLinearVelocity
-    local goal=Vector3.new(dir.X*SMOOTH_VEL,cur.Y,dir.Z*SMOOTH_VEL)
+    local goal=Vector3.new(dir.X*vel,cur.Y,dir.Z*vel)
 
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
 
+    lastPushed=os.clock()
     pcall(function()
         CR2.AssemblyLinearVelocity=goal
         CR2.AssemblyAngularVelocity=Vector3.zero
@@ -825,13 +952,17 @@ local function BC2(ch)
             HI2=false
             SMOOTH_VEL=0
             lastPos=nil
-            POS_HISTORY={}
             lagBackUntil=0
             IH2()
             SM2()
             HD2()
             setupDeathBlock()
             killSpeedListeners()
+            disableUGI()
+            makePromptsInstant()
+            setupAntiTrap()
+            freezeHumanoidState(CH2)
+            blockDeathReplication(CH2)
         end)
     end)
 end
