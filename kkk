@@ -489,11 +489,6 @@ end
 GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible if GenFrame.Visible then GenFrame.Size=UDim2.new(1,0,0,0)tween(GenFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)end end)
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
--- ============================================================
--- 加速功能（内联，不读远程）
--- 速度反作弊绕过：AssemblyLinearVelocity 持续推力 + 位移突变放弃
--- 新增：跳跃修复 + 反拉回 + 多层死亡禁用
--- ============================================================
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
 local L2=P2.LocalPlayer
@@ -501,33 +496,31 @@ local t2={g=getrawmetatable,sr=setreadonly,gc=getconnections,ncm=getnamecallmeth
 local A2={}
 for k,v in pairs(t2)do A2[k]=type(v)=="function"end
 local UI_MIN2,UI_MAX2=1,200
-local MUL2=5
-local ANIM2=26
+local MUL2=9
 local STOP2=0.01
-local MAX_STEP2=20
-local OFFSET2=0.3
-local BASE_RATE2=1/30
+local VELOCITY_MUTATION_LIMIT=3000
+local SMOOTH_VEL=0
+local SMOOTH_ACCEL=60
+local LAG_BACK_COOLDOWN=1.0
+local LAG_BACK_DIST=5
+local LAG_BACK_DOT=-0.5
+
 local SP2=false
 local US2=16
 local CH2=nil
 local CR2=nil
 local HI2=false
-local NEXT_T2=0
-local LAST_T2=0
 local ORI2={}
 local ORIGINAL2={}
-local PHASE2=0
 local SPF2={WalkSpeed=16,HipHeight=2}
 local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
 local deathConns={}
-local VELOCITY_MUTATION_LIMIT=3000
+local lastPos=nil
+local lagBackUntil=0
 
--- 反拉回：位置历史
 local POS_HISTORY={}
-local HISTORY_SIZE=3
-local LAG_BACK_DIST=5
-local LAG_BACK_DOT=-0.5
+local HISTORY_SIZE=2
 
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
 local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction"}
@@ -541,7 +534,53 @@ local function IG2()
     return st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.RunningNoPhysics or st==Enum.HumanoidStateType.Landed or st==Enum.HumanoidStateType.Seated
 end
 
--- 死亡禁用：多层拦截
+local function isSensitive()
+    if not CH2 or not CH2.Parent then return true end
+    if CH2.FloorMaterial==Enum.Material.Air then return true end
+    local ok,st=pcall(function()return CH2:GetState()end)
+    if ok and st then
+        if st==Enum.HumanoidStateType.Physics
+            or st==Enum.HumanoidStateType.Ragdoll
+            or st==Enum.HumanoidStateType.FallingDown
+            or st==Enum.HumanoidStateType.PlatformStanding then
+            return true
+        end
+    end
+    if CH2.Sit or CH2.PlatformStand then return true end
+    if os.clock()<lagBackUntil then return true end
+    return false
+end
+
+local function detectLagBack()
+    if not CR2 or not CR2.Parent then return end
+    if not CH2 or not CH2.Parent then return end
+    local cur=CR2.Position
+    local mv=CH2.MoveDirection
+    if not lastPos then
+        lastPos=cur
+        table.insert(POS_HISTORY,1,CR2.CFrame)
+        while #POS_HISTORY>HISTORY_SIZE do table.remove(POS_HISTORY) end
+        return
+    end
+    local delta=cur-lastPos
+    local dist=delta.Magnitude
+    lastPos=cur
+    table.insert(POS_HISTORY,1,CR2.CFrame)
+    while #POS_HISTORY>HISTORY_SIZE do table.remove(POS_HISTORY) end
+    if dist<LAG_BACK_DIST then return end
+    if mv.Magnitude<0.1 then return end
+    local dot=delta.Unit:Dot(mv.Unit)
+    if dot<LAG_BACK_DOT then
+        lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
+        SMOOTH_VEL=0
+        pcall(function()
+            local v0=CR2.AssemblyLinearVelocity
+            CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
+            CR2.AssemblyAngularVelocity=Vector3.zero
+        end)
+    end
+end
+
 local function setupDeathBlock()
     if not CH2 then return end
     for _,c in ipairs(deathConns) do
@@ -593,40 +632,6 @@ local function updateDeathBlock()
     deathBlocked=true
 end
 
--- 反拉回：记录历史 + 检测反向跳变
-local function updatePosHistory()
-    if not CR2 or not CR2.Parent then return end
-    table.insert(POS_HISTORY,1,CR2.CFrame)
-    while #POS_HISTORY>HISTORY_SIZE do
-        table.remove(POS_HISTORY)
-    end
-end
-
-local function detectLagBack()
-    if not CR2 or not CR2.Parent then return end
-    if not CH2 or not CH2.Parent then return end
-    if #POS_HISTORY<2 then return end
-
-    local cur=CR2.Position
-    local prev=POS_HISTORY[1].Position
-    local delta=cur-prev
-    local dist=delta.Magnitude
-    if dist<LAG_BACK_DIST then return end
-
-    local mv=CH2.MoveDirection
-    if mv.Magnitude<0.1 then return end
-
-    local dot=delta.Unit:Dot(mv.Unit)
-    if dot<LAG_BACK_DOT then
-        if POS_HISTORY[2] then
-            pcall(function()
-                CR2.CFrame=POS_HISTORY[2]
-            end)
-        end
-    end
-end
-
--- 速度监听拦截加强：禁用所有监听角色属性的连接
 local function killSpeedListeners()
     if not t2.gc then return end
     local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity","WalkSpeed"}
@@ -770,24 +775,38 @@ local function HD2()
     end)
 end
 
--- 速度反作弊绕过：持续推力 + 位移突变放弃
-local function pushSpeed()
-    if not CR2 or not CR2.Parent then return end
-    if not CH2 or not CH2.Parent then return end
-    if CH2.FloorMaterial==Enum.Material.Air then return end
+local function pushSpeed(dt)
+    if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
+    if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
+
+    if isSensitive() then
+        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
+        return
+    end
 
     local mv=CH2.MoveDirection
-    if mv.Magnitude<STOP2 then return end
-    if not IG2()then return end
+    if mv.Magnitude<STOP2 then
+        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
+        return
+    end
 
     local target=RS2()
-    if target<=16 then return end
+    if target<=16 then
+        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
+        return
+    end
+
+    local step=SMOOTH_ACCEL*math.max(dt,0.001)
+    if SMOOTH_VEL<target then
+        SMOOTH_VEL=math.min(target,SMOOTH_VEL+step)
+    elseif SMOOTH_VEL>target then
+        SMOOTH_VEL=math.max(target,SMOOTH_VEL-step)
+    end
 
     local dir=Vector3.new(mv.X,0,mv.Z).Unit
     local cur=CR2.AssemblyLinearVelocity
-    local goal=Vector3.new(dir.X*target,cur.Y,dir.Z*target)
+    local goal=Vector3.new(dir.X*SMOOTH_VEL,cur.Y,dir.Z*SMOOTH_VEL)
 
-    -- 位移突变检测：和当前速度差太多就放弃这一帧
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
 
@@ -804,9 +823,10 @@ local function BC2(ch)
             CH2=ch:WaitForChild("Humanoid",5)
             CR2=ch:WaitForChild("HumanoidRootPart",5)
             HI2=false
-            LAST_T2=tick()
-            NEXT_T2=LAST_T2
+            SMOOTH_VEL=0
+            lastPos=nil
             POS_HISTORY={}
+            lagBackUntil=0
             IH2()
             SM2()
             HD2()
@@ -818,16 +838,15 @@ end
 if L2.Character then BC2(L2.Character)end
 L2.CharacterAdded:Connect(BC2)
 
-R2.Heartbeat:Connect(function()
+R2.Heartbeat:Connect(function(dt)
     pcall(function()
         if not VERIFY2()then HI2=false task.spawn(function()pcall(IH2)end)end
-        if not SP2 then return end
-        if not CH2 or not CH2.Parent then return end
-        if not CR2 or not CR2.Parent then return end
+        if not SP2 then SMOOTH_VEL=0 return end
+        if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
+        if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
         updateDeathBlock()
-        updatePosHistory()
         detectLagBack()
-        pushSpeed()
+        pushSpeed(dt)
     end)
 end)
 task.spawn(function()pcall(SR2)end)
@@ -837,18 +856,18 @@ local function SS2(v)
     v=math.clamp(math.floor(v+0.5),UI_MIN2,UI_MAX2)
     US2=v
     SP2=US2>16
-    if not SP2 and CR2 and CR2.Parent then
-        pcall(function()
-            local v0=CR2.AssemblyLinearVelocity
-            CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
-            CR2.AssemblyAngularVelocity=Vector3.zero
-        end)
+    if not SP2 then
+        SMOOTH_VEL=0
+        if CR2 and CR2.Parent then
+            pcall(function()
+                local v0=CR2.AssemblyLinearVelocity
+                CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
+                CR2.AssemblyAngularVelocity=Vector3.zero
+            end)
+        end
     end
 end
 
--- ============================================================
--- 加速卡片（内联回调，不读远程）
--- ============================================================
 local SpeedCard=AddFeature("绕过反作弊加速")
 SpeedCard.config.value=16
 SpeedCard.config.default=16
@@ -858,9 +877,6 @@ SpeedCard.onChange(function(v)
     pcall(SS2, v)
 end)
 
--- ============================================================
--- 远程脚本读取（保留原有拉取逻辑）
--- ============================================================
 REG:OnInsert(function(name,url)
     Library:AddItem(name,function()
         if url and url~=""then pcall(function()loadstring(game:HttpGet(url,true))()end)end
