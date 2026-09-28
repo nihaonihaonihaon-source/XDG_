@@ -7,8 +7,6 @@ local has_getconnections = type(getconnections) == "function"
 local has_newcclosure = type(newcclosure) == "function"
 local has_getnamecallmethod = type(getnamecallmethod) == "function"
 local has_getgc = type(getgc) == "function"
-local has_hookfunction = type(hookfunction) == "function"
-local has_checkcaller = type(checkcaller) == "function"
 
 local genv = has_getgenv and getgenv() or _G
 if genv.XDG_UI_Loaded then
@@ -89,7 +87,18 @@ local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 
 -- ============ 配色 ============
-local COLOR = { PanelBg = Color3.fromRGB(30, 30, 35), PanelTrans = 0.95, TitleBg = Color3.fromRGB(45, 45, 50), TitleTrans = 0.30, SearchBg = Color3.fromRGB(50, 50, 55), SearchTrans = 0.50, ListBg = Color3.fromRGB(40, 40, 45), ListTrans = 0.50, ItemBg = Color3.fromRGB(50, 50, 55), ItemTrans = 0.30, ItemHover = Color3.fromRGB(64, 64, 78), ItemHoverT = 0.05, ItemPress = Color3.fromRGB(60, 120, 255), ItemPressT = 0, TextMain = Color3.fromRGB(220, 220, 220), TextDim = Color3.fromRGB(168, 174, 188), AccentBlue = Color3.fromRGB(60, 120, 255), AccentGreen = Color3.fromRGB(80, 160, 80), AccentRed = Color3.fromRGB(200, 50, 50) }
+local COLOR = {
+    PanelBg = Color3.fromRGB(30, 30, 35), PanelTrans = 0.95,
+    TitleBg = Color3.fromRGB(45, 45, 50), TitleTrans = 0.30,
+    SearchBg = Color3.fromRGB(50, 50, 55), SearchTrans = 0.50,
+    ListBg = Color3.fromRGB(40, 40, 45), ListTrans = 0.50,
+    ItemBg = Color3.fromRGB(50, 50, 55), ItemTrans = 0.30,
+    ItemHover = Color3.fromRGB(64, 64, 78), ItemHoverT = 0.05,
+    ItemPress = Color3.fromRGB(60, 120, 255), ItemPressT = 0,
+    TextMain = Color3.fromRGB(220, 220, 220), TextDim = Color3.fromRGB(168, 174, 188),
+    AccentBlue = Color3.fromRGB(60, 120, 255), AccentGreen = Color3.fromRGB(80, 160, 80),
+    AccentRed = Color3.fromRGB(200, 50, 50),
+}
 
 local function tween(obj, props, time, style, dir)
     local info = TweenInfo.new(time or 0.18, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
@@ -909,606 +918,89 @@ GenClose.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 加速核心（Velocity + 动画补偿 + 反作弊绕过）
+-- 通用功能：自校验远程功能加载器
 -- ============================================================
-local IS_SPEEDING = false
-local UI_SPEED = 16
-local REAL_SPEED_BASE = 400
-local ANIM_SLOW_THRESHOLD = 26
-local STOP_THRESHOLD = 0.01
-local COLLISION_TOLERANCE = 0.15
-local COLLISION_SLOW_FACTOR = 0.35
-local COLLISION_DURATION = 0.3
-local TELEPORT_DISTANCE = 200
-local TELEPORT_WINDOW = 0.5
-local RESYNC_COOLDOWN = 1
-local STUCK_FRAMES = 15
-local lastCollisionTime = 0
-local currentSpeedMultiplier = 1
-local isGrounded = true
-local currentHumanoid = nil
-local currentRoot = nil
-local velocityForce = nil
-local velocityAttachment = nil
-local hookInstalled = false
-local lastMoveDir = Vector3.zero
-local desiredVelocity = Vector3.zero
-local lastPos = Vector3.zero
-local lastPosTime = 0
-local zeroFrames = 0
-local lastResync = 0
-
-local function clearVelocity()
-    if velocityForce then
-        pcall(function()
-            if velocityForce:IsA("LinearVelocity") then
-                velocityForce.VectorVelocity = Vector3.zero
-            else
-                velocityForce.Velocity = Vector3.zero
-            end
-            velocityForce:Destroy()
-        end)
-        velocityForce = nil
-    end
-    if velocityAttachment then
-        pcall(function() velocityAttachment:Destroy() end)
-        velocityAttachment = nil
-    end
-end
-
-local function freezeCharacter()
-    if not currentRoot then return end
-    pcall(function()
-        currentRoot.AssemblyLinearVelocity = Vector3.new(0, currentRoot.AssemblyLinearVelocity.Y, 0)
-        currentRoot.AssemblyAngularVelocity = Vector3.zero
-    end)
-    if currentHumanoid then
-        pcall(function()
-            currentHumanoid:ChangeState(Enum.HumanoidStateType.Running)
-        end)
-    end
-end
-
-local function applyWalkSpeed(v)
-    if not currentHumanoid then return end
-    if has_sethiddenproperty then
-        pcall(sethiddenproperty, currentHumanoid, "WalkSpeed", v)
-    end
-    pcall(function() currentHumanoid.WalkSpeed = v end)
-end
-
--- ============ 反作弊绕过层 ============
-local BYPASS = {
-    enabled = true,
-    spoofed = { WalkSpeed = 16, JumpPower = 50, JumpHeight = 7.2, HipHeight = 2 },
-    keywords = {
-        "anticheat", "anti_cheat", "ac_", "speedcheck", "report", "detect", "kick", "ban",
-        "hack", "velocity", "bodyvelocity", "linearvelocity", "bodyforce",
-        "move", "position", "warp", "teleport", "movement", "check",
-        "exploit", "suspicious", "violation", "violate",
+local REMOTE_FEATURES = {
+    {
+        title = "绕过反作弊加速",
+        key = "XDG_FEATURE_SPEED_2026",
+        url = "https://xdg-hob.nihaonihaonihaon.workers.dev/28/speed_module",
+        value = 16,
+        min = 1,
+        max = 200,
     },
+    -- 加新功能：往这里加一项，key 换一下
+    -- {
+    --     title = "新功能名",
+    --     key = "XDG_FEATURE_XXX_2026",
+    --     url = "新功能脚本地址",
+    --     value = 16,
+    --     min = 1,
+    --     max = 200,
+    -- },
 }
 
-local function isSuspiciousName(name)
-    if not name then return false end
-    local lower = string.lower(name)
-    for _, kw in ipairs(BYPASS.keywords) do
-        if lower:find(kw, 1, true) then return true end
+local featureCache = {}
+
+local function loadRemoteFeature(feature)
+    if featureCache[feature.key] then
+        return featureCache[feature.key]
     end
-    return false
-end
-
-local function isAntiCheatRelated(obj)
-    if not obj or not obj.Name then return false end
-    return isSuspiciousName(obj.Name)
-end
-
-local function installHook()
-    if hookInstalled then return end
-    if not (has_getrawmetatable and has_setreadonly) then return end
-    pcall(function()
-        local mt = getrawmetatable(game)
-        if not mt or type(mt) ~= "table" then return end
-        setreadonly(mt, false)
-        local oldIndex = mt.__index
-        local oldNewIndex = mt.__newindex
-        if type(oldIndex) ~= "function" or type(oldNewIndex) ~= "function" then return end
-        local fnIdx = function(t, k)
-            if currentHumanoid and t == currentHumanoid and BYPASS.spoofed[k] then
-                return BYPASS.spoofed[k]
-            end
-            if currentRoot and t == currentRoot and (k == "AssemblyLinearVelocity" or k == "Velocity") then
-                local realVel = oldIndex(t, k)
-                if IS_SPEEDING and currentHumanoid and currentHumanoid.MoveDirection.Magnitude > 0.1 then
-                    local fakeVel = currentHumanoid.MoveDirection.Unit * 16
-                    return Vector3.new(fakeVel.X, realVel.Y, fakeVel.Z)
-                end
-                return realVel
-            end
-            return oldIndex(t, k)
-        end
-        local fnNew = function(t, k, v)
-            if currentHumanoid and t == currentHumanoid and BYPASS.spoofed[k] then
-                return
-            end
-            if currentRoot and t == currentRoot and (k == "AssemblyLinearVelocity" or k == "Velocity") then
-                if IS_SPEEDING then return end
-            end
-            return oldNewIndex(t, k, v)
-        end
-        if has_newcclosure then
-            local ok1, w1 = pcall(function() return newcclosure(fnIdx) end)
-            if ok1 and type(w1) == "function" then fnIdx = w1 end
-            local ok2, w2 = pcall(function() return newcclosure(fnNew) end)
-            if ok2 and type(w2) == "function" then fnNew = w2 end
-        end
-        mt.__index = fnIdx
-        mt.__newindex = fnNew
-        local oldNamecall = mt.__namecall
-        if type(oldNamecall) == "function" and has_getnamecallmethod then
-            local fnName = function(self, ...)
-                local method = getnamecallmethod()
-                if method == "FireServer" then
-                    local args = { ... }
-                    for _, arg in ipairs(args) do
-                        if type(arg) == "table" then
-                            if arg.speed or arg.walkspeed or arg.velocity or arg.pos or arg.position
-                               or arg.movement or arg.move or arg.offset then return end
-                        elseif type(arg) == "Vector3" then
-                            if arg.Magnitude > 50 then return end
-                        end
-                    end
-                end
-                return oldNamecall(self, ...)
-            end
-            if has_newcclosure then
-                local ok3, w3 = pcall(function() return newcclosure(fnName) end)
-                if ok3 and type(w3) == "function" then fnName = w3 end
-            end
-            mt.__namecall = fnName
-        end
-        setreadonly(mt, true)
-        hookInstalled = true
+    local ok, raw = pcall(function()
+        return game:HttpGet(feature.url, true)
     end)
-end
-
-local function severRemotes()
-    if not has_getconnections then return end
-    local roots = {
-        game:GetService("ReplicatedStorage"),
-        game:GetService("ReplicatedFirst"),
-        LP,
-        LP:FindFirstChild("PlayerScripts"),
-        game:GetService("StarterPlayer"),
-        workspace,
-    }
-    for _, root in ipairs(roots) do
-        if root then
-            local ok, desc = pcall(function() return root:GetDescendants() end)
-            if ok and type(desc) == "table" then
-                for _, obj in ipairs(desc) do
-                    local okISA = pcall(function()
-                        return obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableEvent") or obj:IsA("BindableFunction")
-                    end)
-                    if okISA and isAntiCheatRelated(obj) then
-                        for _, ev in ipairs({ "OnClientEvent", "OnServerEvent", "Event", "Invoke" }) do
-                            local okc, cons = pcall(function() return getconnections(obj[ev]) end)
-                            if okc and type(cons) == "table" then
-                                for _, c in ipairs(cons) do
-                                    pcall(function() c:Disconnect() end)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
+    if not ok or not raw or raw == "" then
+        warn("[XDG] 拉取失败: " .. tostring(feature.url))
+        return nil
     end
-end
-
-local function startAntiCheatScriptMonitor()
-    pcall(function()
-        game.DescendantAdded:Connect(function(obj)
-            if not BYPASS.enabled then return end
-            if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                if isAntiCheatRelated(obj) then
-                    task.defer(function()
-                        pcall(function()
-                            if obj:IsA("LocalScript") then obj.Disabled = true end
-                        end)
-                    end)
-                end
-            end
-        end)
+    local ok2, chunk = pcall(function()
+        return loadstring(raw)
     end)
-end
-
-local function installGCHiding()
-    if not has_getgc then return end
-    pcall(function()
-        local oldGetGC = getgc
-        local fn = function(includeTables)
-            local objects = oldGetGC(includeTables)
-            if type(objects) ~= "table" then return objects end
-            local filtered = {}
-            for _, obj in ipairs(objects) do
-                local ok, name = pcall(function() return obj.Name end)
-                if not ok or (type(name) == "string" and not name:find("XDG")) then
-                    table.insert(filtered, obj)
-                end
-            end
-            return filtered
-        end
-        if has_newcclosure then
-            local ok, w = pcall(function() return newcclosure(fn) end)
-            if ok and type(w) == "function" then fn = w end
-        end
-        getgc = fn
-    end)
-end
-
-local function installGUIProtection()
-    if not BYPASS.enabled then return end
-    pcall(function()
-        game.DescendantAdded:Connect(function(obj)
-            if obj:IsA("ScreenGui") and obj.Name:find("XDG") then
-                task.defer(function()
-                    pcall(function()
-                        if obj.Parent then obj.Parent = game:GetService("CoreGui") end
-                    end)
-                end)
-            end
-        end)
-    end)
-end
-
-local function hideFromDebug()
-    -- debug.getinfo hook
-    pcall(function()
-        local oldGetInfo = debug.getinfo
-        if type(oldGetInfo) ~= "function" then return end
-        local fn = function(...)
-            local info = oldGetInfo(...)
-            if info and info.source and info.source:find("XDG") then return nil end
-            return info
-        end
-        if has_newcclosure then
-            local ok, w = pcall(function() return newcclosure(fn) end)
-            if ok and type(w) == "function" then fn = w end
-        end
-        debug.getinfo = fn
-    end)
-    -- debug.traceback hook
-    pcall(function()
-        local oldTraceback = debug.traceback
-        if type(oldTraceback) ~= "function" then return end
-        local fn = function(...)
-            local info = oldTraceback(...)
-            if type(info) == "string" then
-                info = info:gsub("XDG[%w_]*", "Core")
-            end
-            return info
-        end
-        if has_newcclosure then
-            local ok, w = pcall(function() return newcclosure(fn) end)
-            if ok and type(w) == "function" then fn = w end
-        end
-        debug.traceback = fn
-    end)
-end
-
--- ============ 环境伪装（来自 Ult-Killer） ============
-local function killEnvironmentDetection()
-    if not has_hookfunction or not has_checkcaller then return end
-    -- Hook getfenv
-    pcall(function()
-        local oldGetfenv = getfenv
-        if type(oldGetfenv) ~= "function" then return end
-        local fn = function(f)
-            if not checkcaller() then
-                local realEnv = oldGetfenv(f)
-                local fakeEnv = {}
-                for k, v in pairs(realEnv) do
-                    if type(k) == "string" and not (
-                       string.find(string.lower(k), "hook") or
-                       string.find(string.lower(k), "getgc") or
-                       string.find(string.lower(k), "bypass") or
-                       string.find(string.lower(k), "xdg")) then
-                        fakeEnv[k] = v
-                    end
-                end
-                return fakeEnv
-            end
-            return oldGetfenv(f)
-        end
-        if has_newcclosure then
-            local ok, w = pcall(function() return newcclosure(fn) end)
-            if ok and type(w) == "function" then fn = w end
-        end
-        getfenv = fn
-    end)
-end
-
--- ============ 安全连接禁用（只禁用日志和错误信号） ============
-local function disableSafeConnections()
-    if not has_getconnections then return end
-    local safeSignals = {
-        game:GetService("LogService").MessageOut,
-        game:GetService("ScriptContext").Error,
-        LP.Idled,
-    }
-    for _, signal in pairs(safeSignals) do
-        if signal then
-            local ok, cons = pcall(function() return getconnections(signal) end)
-            if ok and type(cons) == "table" then
-                for _, connection in ipairs(cons) do
-                    pcall(function() connection:Disable() end)
-                end
-            end
-        end
+    if not ok2 or type(chunk) ~= "function" then
+        warn("[XDG] 编译失败: " .. tostring(feature.url))
+        return nil
     end
-end
-
-local function createVelocity()
-    if not currentRoot or not currentRoot.Parent then return end
-    if velocityForce and velocityForce.Parent then return end
-    local linearSupported = false
-    pcall(function()
-        local t = Instance.new("LinearVelocity")
-        t.Parent = game
-        t:Destroy()
-        linearSupported = true
-    end)
-    if linearSupported then
-        local att = nil
-        pcall(function() att = currentRoot:FindFirstChildOfClass("Attachment") end)
-        if not att then pcall(function() att = Instance.new("Attachment", currentRoot) end) end
-        if att then
-            local ok, lv = pcall(function()
-                local v = Instance.new("LinearVelocity")
-                v.Name = "HumanoidLinear"
-                v.Attachment0 = att
-                v.MaxForce = 1e5
-                v.RelativeTo = Enum.ActuatorRelativeTo.World
-                v.VectorVelocity = Vector3.zero
-                v.Parent = currentRoot
-                return v
-            end)
-            if ok and lv then
-                velocityForce = lv
-                velocityAttachment = att
-                return
-            end
-        end
+    local ok3, result = pcall(chunk)
+    if not ok3 then
+        warn("[XDG] 执行失败: " .. tostring(result))
+        return nil
     end
-    local ok2, bv = pcall(function()
-        local v = Instance.new("BodyVelocity")
-        v.Name = "HumanoidBody"
-        v.MaxForce = Vector3.new(math.huge, 0, math.huge)
-        v.P = 2500
-        v.Velocity = Vector3.zero
-        v.Parent = currentRoot
-        return v
-    end)
-    if ok2 and bv then velocityForce = bv end
-end
-
-local function startSpeed()
-    if not currentHumanoid or not currentRoot then return end
-    installHook()
-    createVelocity()
-    applyWalkSpeed(0)
-end
-
-local function stopSpeed()
-    clearVelocity()
-    freezeCharacter()
-    applyWalkSpeed(16)
-end
-
-local function resyncAll()
-    local now = tick()
-    if now - lastResync < RESYNC_COOLDOWN then return end
-    lastResync = now
-    hookInstalled = false
-    clearVelocity()
-    task.defer(function()
-        pcall(function()
-            if currentHumanoid and currentRoot then
-                installHook()
-                if IS_SPEEDING then
-                    createVelocity()
-                    applyWalkSpeed(0)
-                end
-            end
-        end)
-    end)
-end
-
-RunService.PreSimulation:Connect(function()
-    pcall(function()
-        if not currentHumanoid or not currentHumanoid.Parent or not currentRoot or not currentRoot.Parent then
-            clearVelocity()
-            return
-        end
-        if not IS_SPEEDING then
-            desiredVelocity = Vector3.zero
-            if velocityForce and velocityForce.Parent then clearVelocity() end
-            return
-        end
-        local state = currentHumanoid:GetState()
-        local grounded = (state == Enum.HumanoidStateType.Running
-                       or state == Enum.HumanoidStateType.RunningNoPhysics
-                       or state == Enum.HumanoidStateType.Landed
-                       or state == Enum.HumanoidStateType.Seated)
-        isGrounded = grounded
-        local now = tick()
-        if isGrounded and (now - lastCollisionTime) < COLLISION_DURATION then
-            currentSpeedMultiplier = COLLISION_SLOW_FACTOR
-        else
-            currentSpeedMultiplier = 1
-        end
-        local mv = currentHumanoid.MoveDirection
-        if mv.Magnitude > STOP_THRESHOLD then
-            lastMoveDir = mv.Unit
-        end
-        if not isGrounded then
-            if velocityForce and velocityForce.Parent then
-                local realTarget = REAL_SPEED_BASE * (UI_SPEED / 200) * currentSpeedMultiplier
-                if realTarget <= 16 then realTarget = UI_SPEED end
-                if velocityForce:IsA("LinearVelocity") then
-                    velocityForce.VectorVelocity = Vector3.new(lastMoveDir.X * realTarget, 0, lastMoveDir.Z * realTarget)
-                end
-            end
-            return
-        end
-        if mv.Magnitude > STOP_THRESHOLD then
-            lastMoveDir = mv.Unit
-        else
-            desiredVelocity = Vector3.zero
-            if velocityForce and velocityForce.Parent then
-                if velocityForce:IsA("LinearVelocity") then
-                    velocityForce.VectorVelocity = Vector3.zero
-                else
-                    velocityForce.Velocity = Vector3.zero
-                end
-            end
-            pcall(function()
-                currentRoot.AssemblyLinearVelocity = Vector3.new(0, currentRoot.AssemblyLinearVelocity.Y, 0)
-            end)
-            return
-        end
-        local realTarget = REAL_SPEED_BASE * (UI_SPEED / 200) * currentSpeedMultiplier
-        if realTarget <= 16 then realTarget = UI_SPEED end
-        local jitter = 1 + (math.random() - 0.5) * 0.12
-        local speed = realTarget * jitter
-        local dir = lastMoveDir
-        local currentVel = currentRoot.AssemblyLinearVelocity
-        desiredVelocity = Vector3.new(dir.X * speed, currentVel.Y, dir.Z * speed)
-        if velocityForce and velocityForce.Parent then
-            if velocityForce:IsA("LinearVelocity") then
-                velocityForce.VectorVelocity = Vector3.new(dir.X * speed, 0, dir.Z * speed)
-            else
-                velocityForce.Velocity = Vector3.new(dir.X * speed, 0, dir.Z * speed)
-            end
-        end
-    end)
-end)
-
-RunService.PostSimulation:Connect(function()
-    pcall(function()
-        if not IS_SPEEDING then return end
-        if not currentRoot or not currentRoot.Parent then return end
-        if not isGrounded then return end
-        local actual = currentRoot.AssemblyLinearVelocity
-        local dx = actual.X - desiredVelocity.X
-        local dz = actual.Z - desiredVelocity.Z
-        local deviation = math.sqrt(dx * dx + dz * dz)
-        if deviation > COLLISION_TOLERANCE then
-            lastCollisionTime = tick()
-            currentRoot.AssemblyLinearVelocity = Vector3.new(desiredVelocity.X, actual.Y, desiredVelocity.Z)
-        end
-        local angVel = currentRoot.AssemblyAngularVelocity
-        if math.abs(angVel.Y) > 3 or math.abs(angVel.X) > 3 or math.abs(angVel.Z) > 3 then
-            currentRoot.AssemblyAngularVelocity = Vector3.zero
-        end
-    end)
-end)
-
-RunService.Heartbeat:Connect(function()
-    pcall(function()
-        if not currentHumanoid or not currentHumanoid.Parent or not currentRoot or not currentRoot.Parent then return end
-        if not IS_SPEEDING then return end
-        local now = tick()
-        local pos = currentRoot.Position
-        local dist = (pos - lastPos).Magnitude
-        local teleported = (dist > TELEPORT_DISTANCE and (now - lastPosTime) < TELEPORT_WINDOW)
-        local wsReset = (currentHumanoid.WalkSpeed > 1)
-        local velStuck = false
-        if currentRoot.AssemblyLinearVelocity.Magnitude < 0.1 and currentHumanoid.MoveDirection.Magnitude > 0.1 then
-            zeroFrames = zeroFrames + 1
-            if zeroFrames > STUCK_FRAMES then
-                velStuck = true
-                zeroFrames = 0
-            end
-        else
-            zeroFrames = 0
-        end
-        if teleported or wsReset or velStuck then
-            resyncAll()
-        end
-        lastPos = pos
-        lastPosTime = now
-    end)
-end)
-
-RunService.RenderStepped:Connect(function()
-    pcall(function()
-        if not currentHumanoid or not currentHumanoid.Parent then return end
-        local animator = currentHumanoid:FindFirstChildOfClass("Animator")
-        if not animator then return end
-        local ok, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
-        if not ok or type(tracks) ~= "table" then return end
-        local targetRatio = 1
-        if IS_SPEEDING and UI_SPEED > ANIM_SLOW_THRESHOLD then
-            targetRatio = ANIM_SLOW_THRESHOLD / UI_SPEED
-        end
-        for _, track in ipairs(tracks) do
-            pcall(function()
-                if math.abs(track.Speed - targetRatio) > 0.01 then
-                    track:AdjustSpeed(targetRatio)
-                end
-            end)
-        end
-    end)
-end)
-
-local function bindChar(char)
-    if not char then return end
-    task.spawn(function()
-        pcall(function()
-            local hum = char:WaitForChild("Humanoid", 5)
-            local root = char:WaitForChild("HumanoidRootPart", 5)
-            currentHumanoid = hum
-            currentRoot = root
-            hookInstalled = false
-            lastPos = root.Position
-            lastPosTime = tick()
-            zeroFrames = 0
-            installHook()
-            startAntiCheatScriptMonitor()
-            installGCHiding()
-            installGUIProtection()
-            hideFromDebug()
-            killEnvironmentDetection()
-            if IS_SPEEDING and currentHumanoid and currentRoot then
-                startSpeed()
-            end
-        end)
-    end)
-end
-
-if LP.Character then bindChar(LP.Character) end
-LP.CharacterAdded:Connect(bindChar)
-
-local SpeedFeature = AddFeature("绕过反作弊加速")
-SpeedFeature.onChange(function(v)
-    UI_SPEED = v
-    if UI_SPEED <= 16 then
-        IS_SPEEDING = false
-        stopSpeed()
-    else
-        IS_SPEEDING = true
-        if currentHumanoid and currentRoot and (not velocityForce or not velocityForce.Parent) then
-            startSpeed()
-        end
+    if type(result) ~= "table" then
+        warn("[XDG] 远程脚本未返回表: " .. tostring(feature.url))
+        return nil
     end
-end)
-SpeedFeature.setVal(16)
+    if result.key ~= feature.key then
+        warn("[XDG] KEY 不匹配，拒绝注入: " .. tostring(feature.url)
+            .. " (期望 " .. tostring(feature.key)
+            .. "，收到 " .. tostring(result.key) .. ")")
+        return nil
+    end
+    featureCache[feature.key] = result
+    print("[XDG] 已注入远程功能: " .. feature.title)
+    return result
+end
 
-task.spawn(function() pcall(severRemotes) end)
-task.spawn(function() pcall(disableSafeConnections) end)
+for _, feature in ipairs(REMOTE_FEATURES) do
+    local card = AddFeature(feature.title)
+    card.config.value = feature.value
+    card.config.min = feature.min
+    card.config.max = feature.max
+    card.config.default = feature.value
+    card.onChange(function(v)
+        local mod = loadRemoteFeature(feature)
+        if not mod then return end
+        if type(mod.setSpeed) == "function" then
+            pcall(mod.setSpeed, v)
+        elseif type(mod.onSpeedChanged) == "function" then
+            pcall(mod.onSpeedChanged, v)
+        end
+    end)
+    card.setVal(feature.value)
+end
 
+-- ============================================================
+-- 主脚本远程脚本拉取（REG 列表）
+-- ============================================================
 REG:OnInsert(function(name, url)
     Library:AddItem(name, function()
         if url and url ~= "" then
