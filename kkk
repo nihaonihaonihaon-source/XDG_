@@ -489,6 +489,11 @@ end
 GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible if GenFrame.Visible then GenFrame.Size=UDim2.new(1,0,0,0)tween(GenFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)end end)
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
+-- ============================================================
+-- 加速功能（内联，不读远程）
+-- 速度反作弊绕过：AssemblyLinearVelocity 持续推力 + 位移突变放弃
+-- 新增：跳跃修复 + 反拉回 + 多层死亡禁用
+-- ============================================================
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
 local L2=P2.LocalPlayer
@@ -496,12 +501,12 @@ local t2={g=getrawmetatable,sr=setreadonly,gc=getconnections,ncm=getnamecallmeth
 local A2={}
 for k,v in pairs(t2)do A2[k]=type(v)=="function"end
 local UI_MIN2,UI_MAX2=1,200
-local MUL2=9
+local MUL2=5
 local ANIM2=26
 local STOP2=0.01
 local MAX_STEP2=20
 local OFFSET2=0.3
-local BASE_RATE2=1/90
+local BASE_RATE2=1/30
 local SP2=false
 local US2=16
 local CH2=nil
@@ -518,6 +523,7 @@ local deathBlocked=false
 local deathConns={}
 local VELOCITY_MUTATION_LIMIT=3000
 
+-- 反拉回：位置历史
 local POS_HISTORY={}
 local HISTORY_SIZE=3
 local LAG_BACK_DIST=5
@@ -535,6 +541,7 @@ local function IG2()
     return st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.RunningNoPhysics or st==Enum.HumanoidStateType.Landed or st==Enum.HumanoidStateType.Seated
 end
 
+-- 死亡禁用：多层拦截
 local function setupDeathBlock()
     if not CH2 then return end
     for _,c in ipairs(deathConns) do
@@ -586,6 +593,7 @@ local function updateDeathBlock()
     deathBlocked=true
 end
 
+-- 反拉回：记录历史 + 检测反向跳变
 local function updatePosHistory()
     if not CR2 or not CR2.Parent then return end
     table.insert(POS_HISTORY,1,CR2.CFrame)
@@ -618,6 +626,7 @@ local function detectLagBack()
     end
 end
 
+-- 速度监听拦截加强：禁用所有监听角色属性的连接
 local function killSpeedListeners()
     if not t2.gc then return end
     local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity","WalkSpeed"}
@@ -761,6 +770,7 @@ local function HD2()
     end)
 end
 
+-- 速度反作弊绕过：持续推力 + 位移突变放弃
 local function pushSpeed()
     if not CR2 or not CR2.Parent then return end
     if not CH2 or not CH2.Parent then return end
@@ -777,6 +787,7 @@ local function pushSpeed()
     local cur=CR2.AssemblyLinearVelocity
     local goal=Vector3.new(dir.X*target,cur.Y,dir.Z*target)
 
+    -- 位移突变检测：和当前速度差太多就放弃这一帧
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
 
@@ -835,6 +846,9 @@ local function SS2(v)
     end
 end
 
+-- ============================================================
+-- 加速卡片（内联回调，不读远程）
+-- ============================================================
 local SpeedCard=AddFeature("绕过反作弊加速")
 SpeedCard.config.value=16
 SpeedCard.config.default=16
@@ -844,6 +858,9 @@ SpeedCard.onChange(function(v)
     pcall(SS2, v)
 end)
 
+-- ============================================================
+-- 远程脚本读取（保留原有拉取逻辑）
+-- ============================================================
 REG:OnInsert(function(name,url)
     Library:AddItem(name,function()
         if url and url~=""then pcall(function()loadstring(game:HttpGet(url,true))()end)end
