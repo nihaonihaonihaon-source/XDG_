@@ -490,8 +490,9 @@ GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
 -- ============================================================
--- 加速功能（内联，不读远程）—— 方案 A：90Hz + MAX_STEP2=11.11
--- 新增：跳跃修复 + 反拉回（两帧历史回退）
+-- 加速功能（内联，不读远程）—— 30Hz + 每帧 20 格
+-- 加速方式：默认 CFrame；可切换 Translate（见 ACCEL_MODE）
+-- 新增：速度监听拦截加强 + 死亡禁用 + 反拉回
 -- ============================================================
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
@@ -503,9 +504,10 @@ local UI_MIN2,UI_MAX2=1,200
 local MUL2=5
 local ANIM2=26
 local STOP2=0.01
-local MAX_STEP2=11.11
+local MAX_STEP2=20
 local OFFSET2=0.3
-local BASE_RATE2=1/90
+local BASE_RATE2=1/30
+local ACCEL_MODE="CFrame"  -- 可选 "CFrame" 或 "Translate"
 local SP2=false
 local US2=16
 local CH2=nil
@@ -519,6 +521,7 @@ local PHASE2=0
 local SPF2={WalkSpeed=16,HipHeight=2}
 local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
+local deathConns={}
 
 -- 反拉回：位置历史
 local POS_HISTORY={}
@@ -538,18 +541,59 @@ local function IG2()
     return st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.RunningNoPhysics or st==Enum.HumanoidStateType.Landed or st==Enum.HumanoidStateType.Seated
 end
 
--- 死亡禁用：速度超过阈值时每帧回满血
+-- 死亡禁用：多层拦截
+local function setupDeathBlock()
+    if not CH2 then return end
+    for _,c in ipairs(deathConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    deathConns={}
+
+    -- 1. 禁用 Died 事件的所有连接
+    if t2.gc then
+        local ok,conns=pcall(function() return t2.gc(CH2.Died) end)
+        if ok and conns then
+            for _,c in ipairs(conns) do
+                pcall(function() c:Disable() end)
+            end
+        end
+    end
+
+    -- 2. 每帧锁 Health
+    table.insert(deathConns, R2.Heartbeat:Connect(function()
+        if not deathBlocked then return end
+        if not CH2 or not CH2.Parent then return end
+        pcall(function()
+            if CH2.Health < CH2.MaxHealth then
+                CH2.Health = CH2.MaxHealth
+            end
+        end)
+    end))
+
+    -- 3. 拦截 TakeDamage
+    if hookmetamethod and newcclosure then
+        pcall(function()
+            local mt = getrawmetatable(game)
+            local oldNamecall = mt.__namecall
+            if oldNamecall then
+                setreadonly(mt, false)
+                mt.__namecall = newcclosure(function(self, ...)
+                    local method = getnamecallmethod()
+                    if deathBlocked and self == CH2 and method == "TakeDamage" then
+                        return nil
+                    end
+                    return oldNamecall(self, ...)
+                end)
+                setreadonly(mt, true)
+            end
+        end)
+    end
+end
+
 local function updateDeathBlock()
     if not SP2 then deathBlocked=false return end
     if US2<=DEATH_BLOCK_THRESHOLD then deathBlocked=false return end
     deathBlocked=true
-    if CH2 and CH2.Parent then
-        pcall(function()
-            if CH2.Health<CH2.MaxHealth then
-                CH2.Health=CH2.MaxHealth
-            end
-        end)
-    end
 end
 
 -- 反拉回：记录历史 + 检测反向跳变
@@ -577,11 +621,29 @@ local function detectLagBack()
 
     local dot=delta.Unit:Dot(mv.Unit)
     if dot<LAG_BACK_DOT then
-        -- 检测到反向跳变：回退到两帧前
         if POS_HISTORY[2] then
             pcall(function()
                 CR2.CFrame=POS_HISTORY[2]
             end)
+        end
+    end
+end
+
+-- 速度监听拦截加强：禁用所有监听角色属性的连接
+local function killSpeedListeners()
+    if not t2.gc then return end
+    local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity","WalkSpeed"}
+    local targets = {CR2, CH2}
+    for _, obj in ipairs(targets) do
+        if obj and obj.Parent then
+            for _, prop in ipairs(props) do
+                local ok, conns = pcall(function() return t2.gc(obj:GetPropertyChangedSignal(prop)) end)
+                if ok and conns then
+                    for _, c in ipairs(conns) do
+                        pcall(function() c:Disable() end)
+                    end
+                end
+            end
         end
     end
 end
@@ -608,10 +670,13 @@ local function IH2()
                 if ok and v~=nil then return v end
                 return SPF2[k]
             end
-            if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity")then
+            if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity"or k=="CFrame"or k=="Position")then
                 if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.01 then
                     local d=CH2.MoveDirection.Unit
                     local ok,v=pcall(oi,s,k)
+                    if k=="CFrame" or k=="Position" then
+                        return ok and v or CR2.CFrame
+                    end
                     local y=ok and typeof(v)=="Vector3"and v.Y or 0
                     return Vector3.new(d.X*16,y,d.Z*16)
                 end
@@ -710,10 +775,7 @@ end
 local function TP2()
     if not CR2 or not CR2.Parent then return end
     if not CH2 or not CH2.Parent then return end
-
-    -- 跳跃修复：空中时不做 CFrame 改写
     if CH2.FloorMaterial==Enum.Material.Air then return end
-
     local mv=CH2.MoveDirection
     if mv.Magnitude<STOP2 then return end
     if not IG2()then return end
@@ -734,9 +796,13 @@ local function TP2()
     local d=mv.Unit
     local off=Vector3.new(d.X*dist+jx,0,d.Z*dist+jz)
     pcall(function()
-        local cur=CR2.CFrame
-        local pos=cur.Position+off
-        CR2.CFrame=CFrame.new(pos,pos+Vector3.new(d.X,0,d.Z))
+        if ACCEL_MODE=="Translate" then
+            CR2:TranslateBy(off)
+        else
+            local cur=CR2.CFrame
+            local pos=cur.Position+off
+            CR2.CFrame=CFrame.new(pos,pos+Vector3.new(d.X,0,d.Z))
+        end
     end)
 end
 local function BC2(ch)
@@ -752,6 +818,8 @@ local function BC2(ch)
             IH2()
             SM2()
             HD2()
+            setupDeathBlock()
+            killSpeedListeners()
         end)
     end)
 end
