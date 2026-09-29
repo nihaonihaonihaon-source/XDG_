@@ -671,7 +671,7 @@ MinBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 日志面板
+-- 日志按钮 + 面板
 -- ============================================================
 local LogBtn = Instance.new("TextButton")
 LogBtn.Size = UDim2.new(0,30,0,20)
@@ -826,6 +826,241 @@ task.spawn(function()
     end
 end)
 
+-- ============================================================
+-- 通用功能按钮 + 面板
+-- ============================================================
+local GenBtn = Instance.new("TextButton")
+GenBtn.Size = UDim2.new(0,52,0,20)
+GenBtn.Position = UDim2.new(1,-144,0,3)
+GenBtn.BackgroundColor3 = Color3.fromRGB(35,35,45)
+GenBtn.BackgroundTransparency = 0.25
+GenBtn.Text = "通用功能"
+GenBtn.TextColor3 = Color3.fromRGB(230,230,230)
+GenBtn.TextSize = 9
+GenBtn.Font = Enum.Font.Antique
+GenBtn.AutoButtonColor = false
+GenBtn.Parent = TitleBar
+applyCorner(GenBtn, 5)
+attachButtonFX(GenBtn, 0.25, 0.05)
+
+local GenFrame = Instance.new("Frame")
+GenFrame.Size = UDim2.new(1,0,1,0)
+GenFrame.Position = UDim2.new(0,0,0,0)
+GenFrame.BackgroundColor3 = Color3.fromRGB(25,25,30)
+GenFrame.BackgroundTransparency = 0.05
+GenFrame.BorderSizePixel = 0
+GenFrame.Visible = false
+GenFrame.ZIndex = 60
+GenFrame.Parent = MainFrame
+applyCorner(GenFrame, 10)
+
+local GenClose = Instance.new("TextButton")
+GenClose.Size = UDim2.new(0,20,0,20)
+GenClose.Position = UDim2.new(1,-24,0,4)
+GenClose.BackgroundColor3 = COLOR.AccentRed
+GenClose.BackgroundTransparency = 0.3
+GenClose.Text = "✕"
+GenClose.TextColor3 = Color3.fromRGB(255,255,255)
+GenClose.TextSize = 12
+GenClose.Font = Enum.Font.Antique
+GenClose.AutoButtonColor = false
+GenClose.ZIndex = 65
+GenClose.Parent = GenFrame
+applyCorner(GenClose, 5)
+attachButtonFX(GenClose, 0.3, 0.05)
+
+local GenTitle = Instance.new("TextLabel")
+GenTitle.Size = UDim2.new(1,-40,0,20)
+GenTitle.Position = UDim2.new(0,8,0,4)
+GenTitle.BackgroundTransparency = 1
+GenTitle.Text = "⚙ 通用功能"
+GenTitle.TextColor3 = Color3.fromRGB(255,255,200)
+GenTitle.TextSize = 12
+GenTitle.TextXAlignment = Enum.TextXAlignment.Left
+GenTitle.Font = Enum.Font.Antique
+GenTitle.ZIndex = 62
+GenTitle.Parent = GenFrame
+
+local GenScroll = Instance.new("ScrollingFrame")
+GenScroll.Size = UDim2.new(1,-8,1,-32)
+GenScroll.Position = UDim2.new(0,4,0,28)
+GenScroll.BackgroundColor3 = COLOR.ListBg
+GenScroll.BackgroundTransparency = COLOR.ListTrans
+GenScroll.BorderSizePixel = 0
+GenScroll.ScrollBarThickness = 2
+GenScroll.ScrollBarImageColor3 = Color3.fromRGB(80,80,90)
+GenScroll.CanvasSize = UDim2.new(0,0,0,0)
+GenScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GenScroll.ZIndex = 61
+GenScroll.Parent = GenFrame
+applyCorner(GenScroll, 6)
+
+local GenLayout = Instance.new("UIListLayout")
+GenLayout.Padding = UDim.new(0,4)
+GenLayout.SortOrder = Enum.SortOrder.LayoutOrder
+GenLayout.Parent = GenScroll
+
+local FeatureId = 0
+local function AddFeature(titleText)
+    FeatureId = FeatureId + 1
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1,-4,0,56)
+    card.BackgroundColor3 = Color3.fromRGB(45,45,55)
+    card.BackgroundTransparency = 0.25
+    card.BorderSizePixel = 0
+    card.LayoutOrder = FeatureId
+    card.ZIndex = 62
+    card.Parent = GenScroll
+    applyCorner(card, 6)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,-8,0,18)
+    lbl.Position = UDim2.new(0,4,0,2)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = titleText
+    lbl.TextColor3 = Color3.fromRGB(255,255,255)
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Font = Enum.Font.Antique
+    lbl.ZIndex = 63
+    lbl.Parent = card
+
+    local minus = Instance.new("TextButton")
+    minus.Size = UDim2.new(0,20,0,20)
+    minus.Position = UDim2.new(1,-68,0,30)
+    minus.BackgroundColor3 = Color3.fromRGB(50,50,60)
+    minus.BackgroundTransparency = 0.2
+    minus.Text = "-"
+    minus.TextColor3 = Color3.fromRGB(255,255,255)
+    minus.TextSize = 14
+    minus.Font = Enum.Font.Antique
+    minus.AutoButtonColor = false
+    minus.ZIndex = 63
+    minus.Parent = card
+    applyCorner(minus, 4)
+    attachButtonFX(minus, 0.2, 0.05)
+
+    local plus = Instance.new("TextButton")
+    plus.Size = UDim2.new(0,20,0,20)
+    plus.Position = UDim2.new(1,-24,0,30)
+    plus.BackgroundColor3 = Color3.fromRGB(50,50,60)
+    plus.BackgroundTransparency = 0.2
+    plus.Text = "+"
+    plus.TextColor3 = Color3.fromRGB(255,255,255)
+    plus.TextSize = 14
+    plus.Font = Enum.Font.Antique
+    plus.AutoButtonColor = false
+    plus.ZIndex = 63
+    plus.Parent = card
+    applyCorner(plus, 4)
+    attachButtonFX(plus, 0.2, 0.05)
+
+    local barBg = Instance.new("Frame")
+    barBg.Size = UDim2.new(1,-118,0,8)
+    barBg.Position = UDim2.new(0,52,0,36)
+    barBg.BackgroundColor3 = Color3.fromRGB(35,35,45)
+    barBg.BorderSizePixel = 0
+    barBg.ZIndex = 63
+    barBg.Parent = card
+    applyCorner(barBg, 4)
+
+    local barFill = Instance.new("Frame")
+    barFill.Size = UDim2.new(0,0,1,0)
+    barFill.BackgroundColor3 = COLOR.AccentBlue
+    barFill.BorderSizePixel = 0
+    barFill.ZIndex = 64
+    barFill.Parent = barBg
+    applyCorner(barFill, 4)
+
+    local curLbl = Instance.new("TextLabel")
+    curLbl.Size = UDim2.new(0,50,0,14)
+    curLbl.Position = UDim2.new(0,4,0,30)
+    curLbl.BackgroundTransparency = 1
+    curLbl.Text = "80/80"
+    curLbl.TextColor3 = Color3.fromRGB(180,220,255)
+    curLbl.TextSize = 10
+    curLbl.Font = Enum.Font.Antique
+    curLbl.TextXAlignment = Enum.TextXAlignment.Left
+    curLbl.ZIndex = 63
+    curLbl.Parent = card
+
+    local fn = {value = 80, default = 80, min = 5, max = 500, step = 5}
+
+    local function upd()
+        local pct = (fn.value - fn.min) / (fn.max - fn.min)
+        barFill.Size = UDim2.new(pct, 0, 1, 0)
+        curLbl.Text = tostring(fn.value) .. "/" .. tostring(fn.default)
+    end
+    local function setVal(v)
+        v = tonumber(v) or fn.value
+        local step = fn.step or 1
+        v = math.floor(v / step + 0.5) * step
+        v = math.clamp(v, fn.min, fn.max)
+        fn.value = v
+        upd()
+        if fn.cb then pcall(fn.cb, v) end
+    end
+    local sliding = false
+    local function updFromInput(inp)
+        local rel = inp.Position.X - barBg.AbsolutePosition.X
+        local pct = math.clamp(rel / barBg.AbsoluteSize.X, 0, 1)
+        setVal(fn.min + pct * (fn.max - fn.min))
+    end
+    barBg.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+            updFromInput(inp)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if sliding and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+            updFromInput(inp)
+        end
+    end)
+    minus.MouseButton1Click:Connect(function() setVal(fn.value - (fn.step or 1)) end)
+    plus.MouseButton1Click:Connect(function() setVal(fn.value + (fn.step or 1)) end)
+    upd()
+    return {
+        card = card,
+        setVal = setVal,
+        getVal = function() return fn.value end,
+        onChange = function(cb) fn.cb = cb end,
+        config = fn,
+    }
+end
+
+GenBtn.MouseButton1Click:Connect(function()
+    GenFrame.Visible = not GenFrame.Visible
+    if GenFrame.Visible then
+        GenFrame.Size = UDim2.new(1,0,0,0)
+        tween(GenFrame, {Size = UDim2.new(1,0,1,0)}, 0.24, Enum.EasingStyle.Quint)
+    end
+end)
+GenClose.MouseButton1Click:Connect(function()
+    tween(GenFrame, {Size = UDim2.new(1,0,0,0)}, 0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+    task.wait(0.2)
+    GenFrame.Visible = false
+end)
+
+-- ============================================================
+-- 通用功能卡片（速度）
+-- ============================================================
+local SpeedCard = AddFeature("绕过反作弊加速")
+SpeedCard.config.value = 80
+SpeedCard.config.default = 80
+SpeedCard.config.min = 5
+SpeedCard.config.max = 500
+SpeedCard.config.step = 5
+SpeedCard.setVal(80)
+
+-- ============================================================
+-- REG 回调注册
+-- ============================================================
 REG:OnInsert(function(n, u)
     Library:AddItem(n, function()
         if u and u ~= "" then
@@ -887,7 +1122,7 @@ REG:OnInsertLog(function(d, s)
 end)
 
 -- ============================================================
--- 远程脚本拉取（带调试输出）
+-- 远程脚本拉取
 -- ============================================================
 local SCRIPT_URLS = {
     "https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"
