@@ -1,15 +1,6 @@
---[[ XDG UI + Chilli + Ult-Killer + Uni-Bypass 四合一
-     UI: XDG 原版
-     反作弊: Chilli + Ult-Killer + Uni-Bypass 全部
-     速度: XDG 无缓冲
-     警告：Ult-Killer 会 hook print/warn/error，控制台无输出
-     警告：killConnections 会断连 Heartbeat，可能卡死
+--[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动
+     已移除 Ult-Killer 和 Uni-Bypass（会闪退）
      Copyright (c) XDG Development Group All Rights Reserved. ]]
-
--- ============================================================
--- 逃生开关
--- ============================================================
-local ENABLE_HARDCORE_BYPASS = true
 
 local genv = getgenv and getgenv() or _G
 if genv.XDG_UI_Loaded then
@@ -86,7 +77,7 @@ local function CleanupAll()
 end
 
 -- ============================================================
--- SafeRun 包装
+-- SafeRun
 -- ============================================================
 local SafeModules = {}
 local function SafeRun(name, fn, ...)
@@ -94,7 +85,7 @@ local function SafeRun(name, fn, ...)
     SafeModules[name] = ok and true or false
     if not ok then
         pcall(function()
-            warn(string.format("[XDG-Merged] %s 跳过: %s", name, tostring(err)))
+            warn(string.format("[XDG] %s 跳过: %s", name, tostring(err)))
         end)
     end
     return ok
@@ -111,8 +102,6 @@ local CollectionService = game:GetService("CollectionService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
-local LogService = game:GetService("LogService")
-local ScriptContext = game:GetService("ScriptContext")
 local localPlayer = Players.LocalPlayer
 
 -- ============================================================
@@ -561,7 +550,6 @@ MinBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- 日志面板
 local LogBtn = Instance.new("TextButton")
 LogBtn.Size = UDim2.new(0,30,0,20)
 LogBtn.Position = UDim2.new(1,-88,0,3)
@@ -642,7 +630,6 @@ LogClose.MouseButton1Click:Connect(function()
     LogFrame.Visible = false
 end)
 
--- 通用功能面板
 local GenBtn = Instance.new("TextButton")
 GenBtn.Size = UDim2.new(0,52,0,20)
 GenBtn.Position = UDim2.new(1,-144,0,3)
@@ -780,14 +767,14 @@ local function AddFeature(titleText)
     curLbl.Size = UDim2.new(0,50,0,14)
     curLbl.Position = UDim2.new(0,4,0,30)
     curLbl.BackgroundTransparency = 1
-    curLbl.Text = "16/16"
+    curLbl.Text = "60/60"
     curLbl.TextColor3 = Color3.fromRGB(180,220,255)
     curLbl.TextSize = 10
     curLbl.Font = Enum.Font.Antique
     curLbl.TextXAlignment = Enum.TextXAlignment.Left
     curLbl.ZIndex = 63
     curLbl.Parent = card
-    local fn = { value = 16, default = 16, min = 1, max = 200, step = 1 }
+    local fn = { value = 60, default = 60, min = 5, max = 300, step = 5 }
     local function upd()
         local pct = (fn.value - fn.min) / (fn.max - fn.min)
         barFill.Size = UDim2.new(pct, 0, 1, 0)
@@ -850,7 +837,7 @@ GenClose.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- tbl4 空壳（Chilli 引用）
+-- tbl4 空壳
 -- ============================================================
 local tbl4 = {
     Steal = { Active = false, LastFinishedAt = 0, Carrying = false },
@@ -1088,343 +1075,7 @@ SafeRun("Chilli.GodMode", function()
 end)
 
 -- ============================================================
--- 【Ult-Killer 模块】（如果 ENABLE_HARDCORE_BYPASS = true）
--- ============================================================
-if ENABLE_HARDCORE_BYPASS then
-
-    SafeRun("UltKiller.killLogs", function()
-        if type(hookfunction) ~= "function" then error("hookfunction 不可用") end
-        local null = function(...) return nil end
-        local function hookSafely(func, replacement)
-            if type(func) == "function" then
-                pcall(function() hookfunction(func, replacement) end)
-            end
-        end
-        hookSafely(print, null)
-        hookSafely(warn, null)
-        hookSafely(error, null)
-        if rconsoleprint then hookSafely(rconsoleprint, null) end
-        if rconsolewarn then hookSafely(rconsolewarn, null) end
-        if rconsoleerr then hookSafely(rconsoleerr, null) end
-        if printconsole then hookSafely(printconsole, null) end
-
-        if type(table) == "table" and type(table.concat) == "function" then
-            local tc = table.concat
-            pcall(function()
-                hookfunction(tc, function(t, sep, i, j)
-                    if type(t) == "table" then
-                        for _, v in pairs(t) do
-                            if type(v) == "string" and string.find(string.lower(v), "exploit", 1, true) then
-                                return ""
-                            end
-                        end
-                    end
-                    local ok, r = pcall(tc, t, sep, i, j)
-                    return ok and r or ""
-                end)
-            end)
-        end
-
-        if game and type(game.HttpPost) == "function" then
-            pcall(function() hookfunction(game.HttpPost, null) end)
-        end
-
-        if game and type(game.HttpGet) == "function" then
-            local oldGet = game.HttpGet
-            pcall(function()
-                hookfunction(oldGet, function(self, url, ...)
-                    local isLog = false
-                    pcall(function()
-                        if type(url) == "string" then
-                            local lower = string.lower(url)
-                            if string.find(lower, "log", 1, true) or string.find(lower, "report", 1, true) then
-                                isLog = true
-                            end
-                        end
-                    end)
-                    if isLog then return nil end
-                    local ok, r = pcall(oldGet, self, url, ...)
-                    return ok and r or ""
-                end)
-            end)
-        end
-
-        if type(checkcaller) == "function" then
-            local oldPcall = pcall
-            pcall(function()
-                hookfunction(oldPcall, function(f, ...)
-                    local isCaller = false
-                    pcall(function() isCaller = checkcaller() end)
-                    if not isCaller then return true, nil end
-                    return oldPcall(f, ...)
-                end)
-            end)
-            local oldXpcall = xpcall
-            pcall(function()
-                hookfunction(oldXpcall, function(f, msgh, ...)
-                    local isCaller = false
-                    pcall(function() isCaller = checkcaller() end)
-                    if not isCaller then return true end
-                    return oldXpcall(f, function() return "" end, ...)
-                end)
-            end)
-        end
-    end)
-
-    SafeRun("UltKiller.killConnections", function()
-        if type(getconnections) ~= "function" then error("getconnections 不可用") end
-        local services = {
-            LogService, ScriptContext, localPlayer, RunService, UserInputService, workspace,
-        }
-        local events = {
-            "MessageOut", "Error", "ChildAdded", "DescendantAdded",
-            "ItemChanged", "Heartbeat", "Stepped", "RenderStepped",
-            "InputBegan", "InputChanged", "InputEnded", "Idled", "Changed",
-        }
-        for _, svc in pairs(services) do
-            for _, ev in pairs(events) do
-                pcall(function()
-                    for _, c in pairs(getconnections(svc[ev])) do
-                        c:Disable()
-                    end
-                end)
-            end
-            pcall(function()
-                for _, c in pairs(getconnections(svc:GetPropertyChangedSignal("Name"))) do
-                    c:Disable()
-                end
-            end)
-        end
-        pcall(function()
-            for _, d in pairs(ReplicatedStorage:GetDescendants()) do
-                if d:IsA("RemoteEvent") then
-                    for _, c in pairs(getconnections(d.OnClientEvent)) do
-                        c:Disable()
-                    end
-                end
-            end
-        end)
-    end)
-
-    SafeRun("UltKiller.killEnvironmentDetection", function()
-        if type(hookfunction) ~= "function" or type(checkcaller) ~= "function" then
-            error("hookfunction 或 checkcaller 不可用")
-        end
-        hookfunction(getfenv, function(f)
-            if not checkcaller() then
-                local realEnv = getfenv(f)
-                local fakeEnv = {}
-                for k, v in pairs(realEnv) do
-                    if type(k) == "string" and not string.find(string.lower(k), "hook", 1, true) then
-                        fakeEnv[k] = v
-                    end
-                end
-                return fakeEnv
-            end
-            return getfenv(f)
-        end)
-        if getidentity then
-            hookfunction(getidentity, function()
-                if not checkcaller() then return 2 end
-                return getidentity()
-            end)
-        end
-        if getthreadidentity then
-            hookfunction(getthreadidentity, function()
-                if not checkcaller() then return 2 end
-                return getthreadidentity()
-            end)
-        end
-    end)
-
-end
-
--- ============================================================
--- 【Uni-Bypass 模块】（如果 ENABLE_HARDCORE_BYPASS = true）
--- ============================================================
-if ENABLE_HARDCORE_BYPASS then
-
-    SafeRun("UniBypass.hookGetgc", function()
-        if type(getgc) ~= "function" or type(hookfunction) ~= "function" then
-            error("getgc 或 hookfunction 不可用")
-        end
-        local oldGetgc = getgc
-        pcall(function()
-            hookfunction(getgc, newcclosure(function(...)
-                if not checkcaller() then return {} end
-                local ok2, results = pcall(oldGetgc, ...)
-                if not ok2 then return {} end
-                local filtered = {}
-                for _, v in pairs(results) do
-                    local safe = true
-                    if type(v) == "function" and debug and debug.info then
-                        local ok3, info = pcall(function() return debug.info(v) end)
-                        if ok3 and type(info) == "string" then
-                            if string.find(info, "bypass", 1, true) or string.find(info, "cheat", 1, true) then
-                                safe = false
-                            end
-                        end
-                    end
-                    if safe then table.insert(filtered, v) end
-                end
-                return filtered
-            end))
-        end)
-    end)
-
-    SafeRun("UniBypass.hideGUI", function()
-        if type(hookfunction) ~= "function" or type(newcclosure) ~= "function" then
-            error("hookfunction 或 newcclosure 不可用")
-        end
-        local oldGetDescendants = game.GetDescendants
-        hookfunction(oldGetDescendants, newcclosure(function(self)
-            local results = oldGetDescendants(self)
-            if self == localPlayer and localPlayer.PlayerGui then
-                local filtered = {}
-                for _, v in ipairs(results) do
-                    if v:IsA("ScreenGui") then
-                        if v.Name:find("Bypass") or v.Name:find("XDG") or v.Name:find("Chilli") then
-                            -- skip
-                        else
-                            table.insert(filtered, v)
-                        end
-                    else
-                        table.insert(filtered, v)
-                    end
-                end
-                return filtered
-            end
-            return results
-        end))
-    end)
-
-    SafeRun("UniBypass.hookLoadstring", function()
-        if type(loadstring) ~= "function" or type(newcclosure) ~= "function" then
-            error("loadstring 或 newcclosure 不可用")
-        end
-        local oldLoad = loadstring
-        loadstring = newcclosure(function(code, chunkname)
-            if type(code) == "string" then
-                local lower = string.lower(code)
-                if string.find(lower, "anti", 1, true)
-                    or string.find(lower, "cheat", 1, true)
-                    or string.find(lower, "detect", 1, true)
-                    or string.find(lower, "ban", 1, true)
-                    or string.find(lower, "kick", 1, true)
-                    or string.find(lower, "report", 1, true) then
-                    return function() return true end
-                end
-            end
-            return oldLoad(code, chunkname)
-        end)
-    end)
-
-    SafeRun("UniBypass.hookAntiCheatFunctions", function()
-        if type(getgc) ~= "function" or type(newcclosure) ~= "function" then
-            error("getgc 或 newcclosure 不可用")
-        end
-        for _, v in pairs(getgc(true)) do
-            if type(v) == "table" then
-                for name, func in pairs(v) do
-                    if type(func) == "function" then
-                        local lname = string.lower(tostring(name))
-                        if string.find(lname, "detect", 1, true)
-                            or string.find(lname, "check", 1, true)
-                            or string.find(lname, "report", 1, true)
-                            or string.find(lname, "kick", 1, true)
-                            or string.find(lname, "ban", 1, true) then
-                            pcall(function()
-                                v[name] = newcclosure(function(...) return true end)
-                            end)
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    SafeRun("UniBypass.adonisHook", function()
-        if type(getgc) ~= "function" or type(hookfunction) ~= "function" then
-            error("getgc 或 hookfunction 不可用")
-        end
-        local detected, killfunc
-        for _, v in pairs(getgc(true)) do
-            if type(v) == "table" then
-                local d = rawget(v, "Detected")
-                if type(d) == "function" and not detected then detected = d end
-                if rawget(v, "Variables") and rawget(v, "Process") then
-                    local k = rawget(v, "Kill")
-                    if type(k) == "function" and not killfunc then killfunc = k end
-                end
-            end
-        end
-        if detected then pcall(function() hookfunction(detected, function() return true end) end) end
-        if killfunc then pcall(function() hookfunction(killfunc, function() end) end) end
-    end)
-
-    SafeRun("UniBypass.adonisKickBypass", function()
-        if type(getgc) ~= "function" then error("getgc 不可用") end
-        for _, v in pairs(getgc(true)) do
-            if type(v) == "table" then
-                local idx = rawget(v, "indexInstance")
-                if type(idx) == "table" and type(idx[1]) == "string" and idx[1] == "kick" then
-                    pcall(function() v.tvk = {"kick", function() end} end)
-                end
-            end
-        end
-    end)
-
-    SafeRun("UniBypass.iacBlock", function()
-        if type(hookmetamethod) ~= "function" or type(newcclosure) ~= "function" then
-            error("hookmetamethod 或 newcclosure 不可用")
-        end
-        local oldNamecall
-        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if method == "FireServer" and typeof(self) == "Instance" and self.Name == "iac-respond" then
-                return nil
-            end
-            return oldNamecall(self, ...)
-        end))
-    end)
-
-    SafeRun("UniBypass.monitorNewScripts", function()
-        if type(loadstring) == "function" and type(newcclosure) == "function" then
-            local oldLoad = loadstring
-            loadstring = newcclosure(function(code, chunkname)
-                if type(code) == "string" then
-                    local lower = string.lower(code)
-                    if string.find(lower, "anti", 1, true)
-                        or string.find(lower, "cheat", 1, true)
-                        or string.find(lower, "detect", 1, true) then
-                        return function() return true end
-                    end
-                end
-                return oldLoad(code, chunkname)
-            end)
-        end
-        TrackConn(game.DescendantAdded:Connect(function(d)
-            if d:IsA("Script") or d:IsA("LocalScript") then
-                local lower = string.lower(d.Name)
-                if string.find(lower, "anti", 1, true)
-                    or string.find(lower, "cheat", 1, true)
-                    or string.find(lower, "detect", 1, true)
-                    or string.find(lower, "security", 1, true)
-                    or string.find(lower, "log", 1, true)
-                    or string.find(lower, "kick", 1, true)
-                    or string.find(lower, "ban", 1, true) then
-                    task.defer(function()
-                        pcall(function() d.Disabled = true end)
-                    end)
-                end
-            end
-        end))
-    end)
-
-end
-
--- ============================================================
--- 【XDG 反作弊模块】
+-- 【XDG AntiKick / AntiFling】
 -- ============================================================
 
 SafeRun("XDG.AntiKick", function()
@@ -1458,35 +1109,41 @@ SafeRun("XDG.AntiFling", function()
 end)
 
 -- ============================================================
--- 【XDG 速度模块】
+-- 【XDG 平滑 CFrame 移动模块】
 -- ============================================================
-local SpeedAPIs = {}
 
-SafeRun("XDG.SpeedBypass", function()
+local SmoothMoveAPI = {}
+
+SafeRun("XDG.SmoothMove", function()
     local CAP = {
         getrawmetatable = type(getrawmetatable) == "function",
         setreadonly = type(setreadonly) == "function",
-        getnamecallmethod = type(getnamecallmethod) == "function",
     }
+
     local UI_MIN, UI_MAX = 5, 300
     local TARGET_SPEED = 60
     local SPEED_STEP = 5
-    local STOP = 0.01
-    local MAX_STEP = 30
-    local VEL_LIMIT = 3000
+    local MIN_SPEED = 16
     local LAG_DIST = 5
     local LAG_DOT = -0.5
     local LAG_CD = 1.0
+
+    -- 平滑参数
+    local ACCEL = 8.0        -- 起步加速度（越大越快到达目标速度）
+    local DECEL = 10.0       -- 停止减速度
+    local SMOOTH_FACTOR = 0.35  -- 平滑因子（0-1，越大越"跟手"，越小越"飘"）
+
     local SP = false
     local US = TARGET_SPEED
     local CH = nil
     local CR = nil
     local HI = false
     local ORI = {}
+    local SPF = {WalkSpeed=16, JumpPower=50, JumpHeight=7.2, HipHeight=2}
+    local currentVel = 0     -- 当前平滑速度
     local lastPos = nil
     local lagBackUntil = 0
-    local SPF = {WalkSpeed=16, JumpPower=50, JumpHeight=7.2, HipHeight=2}
-    local function RS() return math.min(US, MAX_STEP * 60) end
+
     local function IsGrounded()
         if not CH then return false end
         local ok, st = pcall(function() return CH:GetState() end)
@@ -1496,6 +1153,7 @@ SafeRun("XDG.SpeedBypass", function()
             or st == Enum.HumanoidStateType.Landed
             or st == Enum.HumanoidStateType.Seated
     end
+
     local function IsSensitive()
         if not CH or not CH.Parent then return true end
         local ok, st = pcall(function() return CH:GetState() end)
@@ -1511,6 +1169,7 @@ SafeRun("XDG.SpeedBypass", function()
         if os.clock() < lagBackUntil then return true end
         return false
     end
+
     local function DetectLagBack()
         if not CR or not CR.Parent or not CH or not CH.Parent then return end
         local cur = CR.Position
@@ -1524,13 +1183,11 @@ SafeRun("XDG.SpeedBypass", function()
         local dot = delta.Unit:Dot(mv.Unit)
         if dot < LAG_DOT then
             lagBackUntil = os.clock() + LAG_CD
-            pcall(function()
-                local v0 = CR.AssemblyLinearVelocity
-                CR.AssemblyLinearVelocity = Vector3.new(0, v0.Y, 0)
-                CR.AssemblyAngularVelocity = Vector3.zero
-            end)
+            currentVel = 0
         end
     end
+
+    -- metatable hook（伪装 WalkSpeed 读数，不拦写入）
     local function InstallMetahook()
         if HI then return end
         if not (CAP.getrawmetatable and CAP.setreadonly) then return end
@@ -1554,14 +1211,6 @@ SafeRun("XDG.SpeedBypass", function()
                 if ok and v ~= nil then return v end
                 return SPF[k]
             end
-            if CR and s == CR and (k == "Velocity" or k == "AssemblyLinearVelocity") then
-                if SP and CH and CH.MoveDirection.Magnitude > 0.1 then
-                    local ok, v = pcall(oi, s, k)
-                    local y = ok and typeof(v) == "Vector3" and v.Y or 0
-                    local d = CH.MoveDirection.Unit
-                    return Vector3.new(d.X * 16, y, d.Z * 16)
-                end
-            end
             return oi(s, k)
         end
         local fn = function(s, k, v)
@@ -1575,84 +1224,139 @@ SafeRun("XDG.SpeedBypass", function()
         setreadonly(m, true)
         HI = true
     end
-    local function VerifyMetahook()
-        if not CAP.getrawmetatable then return true end
-        local ok, m = pcall(getrawmetatable, game)
-        if not ok or type(m) ~= "table" then return false end
-        if ORI.__index and m.__index ~= ORI.__index then return false end
-        if ORI.__newindex and m.__newindex ~= ORI.__newindex then return false end
-        return true
-    end
-    local function PushSpeed()
+
+    -- ============ 平滑 CFrame 移动核心 ============
+    -- 关键：不直接写 AssemblyLinearVelocity，而是通过 CFrame 位移 + 平滑插值
+    local function SmoothMove(dt)
         if not CR or not CR.Parent or not CH or not CH.Parent then return end
         if CH.Health <= 0 then return end
-        if IsSensitive() then return end
-        if not IsGrounded() then return end
-        local mv = CH.MoveDirection
-        if mv.Magnitude < STOP then
-            pcall(function()
-                local v0 = CR.AssemblyLinearVelocity
-                CR.AssemblyLinearVelocity = Vector3.new(0, v0.Y, 0)
-                CR.AssemblyAngularVelocity = Vector3.zero
-            end)
+        if IsSensitive() then
+            -- 敏感状态下平滑减速到 0
+            currentVel = currentVel - DECEL * dt * US
+            if currentVel < 0 then currentVel = 0 end
             return
         end
-        local target = RS()
-        if target <= 16 then return end
-        local dir = Vector3.new(mv.X, 0, mv.Z).Unit
-        local cur = CR.AssemblyLinearVelocity
-        local goal = Vector3.new(dir.X * target, cur.Y, dir.Z * target)
-        if (goal - cur).Magnitude > VEL_LIMIT then return end
-        CR.AssemblyLinearVelocity = goal
-        CR.AssemblyAngularVelocity = Vector3.zero
+        if not IsGrounded() then
+            currentVel = currentVel - DECEL * dt * US
+            if currentVel < 0 then currentVel = 0 end
+            return
+        end
+
+        local mv = CH.MoveDirection
+        local targetVel = 0
+
+        if mv.Magnitude > 0.01 then
+            targetVel = math.min(US, UI_MAX)
+        else
+            targetVel = 0
+        end
+
+        -- 平滑逼近目标速度
+        if currentVel < targetVel then
+            currentVel = math.min(targetVel, currentVel + ACCEL * dt * US)
+        elseif currentVel > targetVel then
+            currentVel = math.max(targetVel, currentVel - DECEL * dt * US)
+        end
+
+        if currentVel < 0.1 then
+            currentVel = 0
+            return
+        end
+
+        -- 平滑移动：用 CFrame 逐帧位移
+        local pos = CR.Position
+        local dir = Vector3.new(mv.X, 0, mv.Z)
+        if dir.Magnitude > 0.01 then
+            dir = dir.Unit
+        else
+            return
+        end
+
+        -- 本帧的位移量
+        local step = currentVel * dt
+
+        -- 用 SMOOTH_FACTOR 做"跟手感"，让角色不是瞬间跳到目标位置
+        local smoothStep = step * SMOOTH_FACTOR + (currentVel * dt * (1 - SMOOTH_FACTOR))
+
+        local newPos = pos + dir * smoothStep
+
+        local delta = newPos - pos
+        local flat = Vector3.new(delta.X, 0, delta.Z)
+        local look = flat.Magnitude > 0.01
+            and CFrame.lookAt(Vector3.new(), flat.Unit)
+            or CR.CFrame.Rotation
+
+        pcall(function()
+            CR.CFrame = CFrame.new(newPos) * look
+            CR.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            CR.AssemblyAngularVelocity = Vector3.zero
+        end)
     end
+
     local function OnChar(ch)
         if not ch then return end
         TrackThread(task.spawn(function()
             CH = ch:WaitForChild("Humanoid", 5)
             CR = ch:WaitForChild("HumanoidRootPart", 5)
             HI = false
+            currentVel = 0
             lastPos = nil
             lagBackUntil = 0
             InstallMetahook()
         end))
     end
+
     if localPlayer.Character then OnChar(localPlayer.Character) end
     TrackConn(localPlayer.CharacterAdded:Connect(OnChar))
-    TrackConn(RunService.Heartbeat:Connect(function()
+
+    TrackConn(RunService.Heartbeat:Connect(function(dt)
         pcall(function()
-            if not VerifyMetahook() then
-                HI = false
-                task.spawn(function() pcall(InstallMetahook) end)
+            if not SP then
+                currentVel = 0
+                return
             end
-            if not SP then return end
-            if not CH or not CH.Parent or not CR or not CR.Parent then return end
+            if not CH or not CH.Parent or not CR or not CR.Parent then
+                currentVel = 0
+                return
+            end
             DetectLagBack()
-            PushSpeed()
+            SmoothMove(dt)
         end)
     end))
+
     local function SetSpeed(v)
         v = tonumber(v) or TARGET_SPEED
         v = math.clamp(math.floor(v / SPEED_STEP + 0.5) * SPEED_STEP, UI_MIN, UI_MAX)
         US = v
-        SP = US > 16
-        if not SP and CR and CR.Parent then
-            local v0 = CR.AssemblyLinearVelocity
-            CR.AssemblyLinearVelocity = Vector3.new(0, v0.Y, 0)
-            CR.AssemblyAngularVelocity = Vector3.zero
+        SP = US > MIN_SPEED
+        if not SP then
+            currentVel = 0
         end
         pcall(function() warn("[XDG-Speed] 速度设置为 " .. US) end)
     end
-    SpeedAPIs.setSpeed = SetSpeed
-    SpeedAPIs.getSpeed = function() return US end
+
+    SmoothMoveAPI.setSpeed = SetSpeed
+    SmoothMoveAPI.getSpeed = function() return US end
+    SmoothMoveAPI.getCurrentVel = function() return currentVel end
+    SmoothMoveAPI.setSmoothFactor = function(v)
+        SMOOTH_FACTOR = math.clamp(tonumber(v) or 0.35, 0.05, 0.95)
+    end
+    SmoothMoveAPI.setAccel = function(a, d)
+        ACCEL = math.max(0.1, tonumber(a) or 8.0)
+        DECEL = math.max(0.1, tonumber(d) or 10.0)
+    end
+
     SetSpeed(TARGET_SPEED)
+
     pcall(function()
         local env = getgenv and getgenv() or _G
-        env.XDG_SpeedBypass = SpeedAPIs
+        env.XDG_SmoothMove = SmoothMoveAPI
     end)
 end)
 
+-- ============================================================
 -- 速度卡片
+-- ============================================================
 local SpeedCard = AddFeature("绕过反作弊加速")
 SpeedCard.config.value = 60
 SpeedCard.config.default = 60
@@ -1660,7 +1364,7 @@ SpeedCard.config.min = 5
 SpeedCard.config.max = 300
 SpeedCard.config.step = 5
 SpeedCard.onChange(function(v)
-    if SpeedAPIs.setSpeed then SpeedAPIs.setSpeed(v) end
+    if SmoothMoveAPI.setSpeed then SmoothMoveAPI.setSpeed(v) end
 end)
 SpeedCard.setVal(60)
 
@@ -1683,13 +1387,18 @@ pcall(function()
         for _, name in ipairs(failed) do print("   - " .. name) end
     end
     print("-------------------------------------------")
-    print("速度接口: getgenv().XDG_SpeedBypass")
+    print("速度接口: getgenv().XDG_SmoothMove")
+    print("   .setSpeed(n)          -- 设置速度")
+    print("   .getSpeed()           -- 读取当前速度")
+    print("   .getCurrentVel()      -- 读取当前平滑速度")
+    print("   .setSmoothFactor(0-1) -- 设置平滑度（默认 0.35）")
+    print("   .setAccel(起, 停)     -- 设置加减速")
     print("===========================================")
 end)
 
 pcall(function()
     game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "XDG + Chilli + UK + UB",
+        Title = "XDG + Chilli",
         Text = string.format("成功 %d / 跳过 %d", #loaded, #failed),
         Duration = 5,
     })
@@ -1711,16 +1420,11 @@ TrackConn(localPlayer.AncestryChanged:Connect(function(_, parent)
     if not parent then
         XDG_MEM.Alive = false
         CleanupAll()
-        pcall(function()
-            local env = getgenv and getgenv() or _G
-            env.XDG_UI_Loaded = nil
-        end)
     end
 end))
 
 return {
     SafeModules = SafeModules,
-    Speed = SpeedAPIs,
+    SmoothMove = SmoothMoveAPI,
     Table = tbl4,
-    HardcoreEnabled = ENABLE_HARDCORE_BYPASS,
 }
