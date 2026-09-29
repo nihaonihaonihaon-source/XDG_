@@ -192,6 +192,9 @@ end
 local Library = {}
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
 
 local COLOR = {
     PanelBg = Color3.fromRGB(30,30,35), PanelTrans = 0.95,
@@ -217,7 +220,7 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "XDGScriptUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0,250,0,280)
@@ -793,7 +796,7 @@ local function GetBeijingTime()
     return string.format("%04d-%02d-%02d %02d:%02d:%02d", t.year, t.month, t.day, t.hour, t.min, t.sec)
 end
 local function LoadPlayerInfo()
-    local p = game.Players.LocalPlayer
+    local p = localPlayer
     if not p then return end
     UserName.Text = p.DisplayName .. " (@" .. p.Name .. ")"
     local ok, th = pcall(function()
@@ -1048,7 +1051,67 @@ GenClose.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 通用功能卡片（速度）
+-- 平滑移动模块（即时速度 / 停止即停）
+-- ============================================================
+local SmoothMove = {}
+local SM = {
+    speed = 80,
+    enabled = false,
+    humanoid = nil,
+    root = nil,
+}
+
+local function bindChar(char)
+    if not char then return end
+    SM.humanoid = char:WaitForChild("Humanoid", 5)
+    SM.root = char:WaitForChild("HumanoidRootPart", 5)
+end
+
+if localPlayer.Character then
+    task.spawn(bindChar, localPlayer.Character)
+end
+localPlayer.CharacterAdded:Connect(function(c)
+    task.spawn(bindChar, c)
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not SM.enabled then return end
+    local hum = SM.humanoid
+    local root = SM.root
+    if not hum or not hum.Parent or not root or not root.Parent then return end
+    if hum.Health <= 0 then return end
+
+    local mv = hum.MoveDirection
+    local moving = mv.Magnitude > 0.01
+
+    if moving then
+        -- 直接给水平速度，没有加速过程
+        local dir = Vector3.new(mv.X, 0, mv.Z).Unit
+        local targetVel = dir * SM.speed
+        root.AssemblyLinearVelocity = Vector3.new(targetVel.X, root.AssemblyLinearVelocity.Y, targetVel.Z)
+        root.AssemblyAngularVelocity = Vector3.zero
+    else
+        -- 松开摇杆立刻停：水平速度清零
+        root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0)
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+end)
+
+function SmoothMove.setSpeed(v)
+    SM.speed = math.clamp(tonumber(v) or 80, 5, 500)
+    SM.enabled = true
+end
+
+function SmoothMove.stop()
+    SM.enabled = false
+end
+
+function SmoothMove.getSpeed()
+    return SM.speed
+end
+
+-- ============================================================
+-- 速度卡片（拖动即生效，停下即停）
 -- ============================================================
 local SpeedCard = AddFeature("绕过反作弊加速")
 SpeedCard.config.value = 80
@@ -1056,6 +1119,9 @@ SpeedCard.config.default = 80
 SpeedCard.config.min = 5
 SpeedCard.config.max = 500
 SpeedCard.config.step = 5
+SpeedCard.onChange(function(v)
+    SmoothMove.setSpeed(v)
+end)
 SpeedCard.setVal(80)
 
 -- ============================================================
