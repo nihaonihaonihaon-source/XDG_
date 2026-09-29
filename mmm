@@ -1,5 +1,6 @@
---[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动 v4
-     规则：速度 < 65 正常走路；速度 ≥ 65 把 WalkSpeed 归零，全靠 CFrame 插值
+--[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动 v5
+     融合 Speed Hub X：35studs 单帧截断 + CFrame.lookAt
+     修掉远程脚本拉取阻塞问题
      Copyright (c) XDG Development Group All Rights Reserved. ]]
 
 local genv = getgenv and getgenv() or _G
@@ -19,9 +20,6 @@ if genv.XDG_UI_Loaded then
 end
 genv.XDG_UI_Loaded = true
 
--- ============================================================
--- 注册表
--- ============================================================
 genv.XDG_REG_KEY_2026 = genv.XDG_REG_KEY_2026 or {}
 local REG = genv.XDG_REG_KEY_2026
 REG.Scripts = REG.Scripts or {}
@@ -58,9 +56,6 @@ function REG:OnInsertLog(cb)
     for _, l in ipairs(self.Logs) do pcall(cb, l.Date, l.Scripts) end
 end
 
--- ============================================================
--- 内存管理
--- ============================================================
 local XDG_MEM = { Connections = {}, Threads = {}, Alive = true }
 local function TrackConn(c) if c then table.insert(XDG_MEM.Connections, c) end return c end
 local function TrackThread(t) if t then table.insert(XDG_MEM.Threads, t) end return t end
@@ -76,9 +71,6 @@ local function CleanupAll()
     end
 end
 
--- ============================================================
--- SafeRun
--- ============================================================
 local SafeModules = {}
 local function SafeRun(name, fn, ...)
     local ok, err = pcall(fn, ...)
@@ -91,9 +83,6 @@ local function SafeRun(name, fn, ...)
     return ok
 end
 
--- ============================================================
--- 服务
--- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -104,9 +93,6 @@ local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local localPlayer = Players.LocalPlayer
 
--- ============================================================
--- UI 构建
--- ============================================================
 local Library = {}
 local COLOR = {
     PanelBg = Color3.fromRGB(30,30,35), PanelTrans = 0.95,
@@ -836,9 +822,6 @@ GenClose.MouseButton1Click:Connect(function()
     GenFrame.Visible = false
 end)
 
--- ============================================================
--- tbl4 空壳
--- ============================================================
 local tbl4 = {
     Steal = { Active = false, LastFinishedAt = 0, Carrying = false },
     Movement = { Owner = nil },
@@ -851,10 +834,6 @@ local tbl4 = {
     Shield = function() end,
     GodMode = function() end,
 }
-
--- ============================================================
--- 【Chilli 反作弊模块】
--- ============================================================
 
 SafeRun("Chilli.MakePromptsInstant", function()
     local promptOriginal = {}
@@ -1074,10 +1053,6 @@ SafeRun("Chilli.GodMode", function()
     end
 end)
 
--- ============================================================
--- 【XDG AntiKick / AntiFling】
--- ============================================================
-
 SafeRun("XDG.AntiKick", function()
     if type(hookmetamethod) ~= "function" or type(newcclosure) ~= "function" then
         error("hookmetamethod 或 newcclosure 不可用")
@@ -1109,9 +1084,8 @@ SafeRun("XDG.AntiFling", function()
 end)
 
 -- ============================================================
--- 【XDG 平滑 CFrame 移动模块 v4】
+-- 【XDG 平滑 CFrame 移动模块 v5】融合 Speed Hub X
 -- ============================================================
-
 local SmoothMoveAPI = {}
 
 SafeRun("XDG.SmoothMove", function()
@@ -1126,9 +1100,8 @@ SafeRun("XDG.SmoothMove", function()
     local WALK_THRESHOLD = 65
     local NORMAL_WALKSPEED = 16
 
-    -- 平滑参数 v4：更平滑
-    local SMOOTH_FACTOR = 0.92      -- 0.92 → 每帧位移只有目标值的 92%，剩下 8% 用 lerp 分摊
-    local LERP_FACTOR = 0.35        -- 剩余位移用 lerp 分摊的比例
+    local SMOOTH_FACTOR = 0.92
+    local LERP_FACTOR = 0.35
     local JITTER_MIN = 0.98
     local JITTER_MAX = 1.02
     local USE_RENDERSTEPPED = true
@@ -1145,8 +1118,6 @@ SafeRun("XDG.SmoothMove", function()
 
     local walkAnimTrack = nil
     local animatorRef = nil
-
-    -- 平滑位移的"影子位置"
     local shadowPos = nil
 
     local function IsGrounded()
@@ -1188,7 +1159,6 @@ SafeRun("XDG.SmoothMove", function()
     local function StartWalkAnimation()
         if walkAnimTrack and walkAnimTrack.IsPlaying then return end
         if not CH then return end
-
         if not animatorRef then
             animatorRef = CH:FindFirstChildOfClass("Animator")
             if not animatorRef then
@@ -1196,17 +1166,13 @@ SafeRun("XDG.SmoothMove", function()
                 animatorRef.Parent = CH
             end
         end
-
         local char = CH.Parent
         if not char then return end
-
         local walkAnim = FindWalkAnimation(char)
         if not walkAnim or not walkAnim:IsA("Animation") then return end
-
         local ok, track = pcall(function()
             return animatorRef:LoadAnimation(walkAnim)
         end)
-
         if ok and track then
             walkAnimTrack = track
             pcall(function()
@@ -1323,38 +1289,43 @@ SafeRun("XDG.SmoothMove", function()
         if dir.Magnitude < 0.01 then return end
         dir = dir.Unit
 
-        -- 计算本帧应移动的距离
         local baseStep = US * dt
         local jitter = JITTER_MIN + math.random() * (JITTER_MAX - JITTER_MIN)
         local step = baseStep * jitter
 
-        -- 初始化影子位置
         if not shadowPos then
             shadowPos = CR.Position
         end
 
-        -- 影子位置向实际位置同步（防止无限漂移）
         local realPos = CR.Position
         if (shadowPos - realPos).Magnitude > 5 then
             shadowPos = realPos
         end
 
-        -- 每帧只移动 step * SMOOTH_FACTOR 的距离
         local applyStep = step * SMOOTH_FACTOR
         local targetPos = shadowPos + dir * applyStep
 
-        -- 用 lerp 把影子和实际位置"黏合"，让过渡更连续
+        -- 【Speed Hub X 融合】单帧位移硬截断到 35 studs
+        local delta = targetPos - realPos
+        if delta.Magnitude > 35 then
+            targetPos = realPos + delta.Unit * 35
+        end
+
         shadowPos = shadowPos:Lerp(targetPos, LERP_FACTOR + (1 - LERP_FACTOR) * SMOOTH_FACTOR)
 
         local finalPos = shadowPos
 
+        -- 【Speed Hub X 融合】CFrame.lookAt
         local flat = Vector3.new(dir.X, 0, dir.Z)
-        local look = flat.Magnitude > 0.01
-            and CFrame.lookAt(Vector3.new(), flat)
-            or CR.CFrame.Rotation
+        local cframe
+        if flat.Magnitude > 0.01 then
+            cframe = CFrame.lookAt(finalPos, finalPos + flat)
+        else
+            cframe = CFrame.new(finalPos) * CR.CFrame.Rotation
+        end
 
         pcall(function()
-            CR.CFrame = CFrame.new(finalPos) * look
+            CR.CFrame = cframe
             CR.AssemblyLinearVelocity = Vector3.zero
             CR.AssemblyAngularVelocity = Vector3.zero
         end)
@@ -1443,6 +1414,381 @@ SafeRun("XDG.SmoothMove", function()
 end)
 
 -- ============================================================
+-- 【Speed Hub X 精华增强模块】不含 ESP
+-- ============================================================
+
+SafeRun("Enhance.RemoveAntiCollision", function()
+    local function tryRemove(character)
+        if not character then return end
+        local obj = character:FindFirstChild("AntiCollisionHighSeedPushBack", true)
+        if obj then
+            pcall(function()
+                obj.Disabled = true
+                obj:Destroy()
+            end)
+        end
+    end
+    TrackConn(localPlayer.CharacterAdded:Connect(function(c)
+        task.defer(function()
+            for i = 1, 20 do
+                tryRemove(c)
+                task.wait(0.2)
+            end
+        end)
+    end))
+    TrackThread(task.spawn(function()
+        while XDG_MEM.Alive do
+            tryRemove(localPlayer.Character)
+            task.wait(0.5)
+        end
+    end))
+end)
+
+SafeRun("Enhance.SetPing", function()
+    local currentPing = 0
+    local enabledPing = false
+    local function applyPing()
+        pcall(function()
+            local ns = settings():GetService("NetworkSettings")
+            if enabledPing then
+                ns.IncomingReplicationLag = math.clamp(currentPing * 0.0006, 0, 1)
+            else
+                ns.IncomingReplicationLag = 0
+            end
+        end)
+    end
+    TrackConn(localPlayer.CharacterRemoving:Connect(function()
+        pcall(function()
+            settings():GetService("NetworkSettings").IncomingReplicationLag = 0
+        end)
+    end))
+    pcall(function()
+        local env = getgenv and getgenv() or _G
+        env.XDG_Ping = {
+            set = function(v, on)
+                currentPing = tonumber(v) or 0
+                enabledPing = on ~= false
+                applyPing()
+            end,
+            get = function() return currentPing, enabledPing end,
+        }
+    end)
+end)
+
+SafeRun("Enhance.AntiKnockbackPlus", function()
+    local tracked = setmetatable({}, { __mode = "k" })
+    local conns = {}
+    local lastGrace = 0
+    local graceActive = false
+
+    local function processHumanoid(hum)
+        if not hum or tracked[hum] then return end
+        tracked[hum] = true
+        pcall(function()
+            hum.BreakJointsOnDeath = false
+            hum.RequiresNeck = false
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+        end)
+    end
+
+    local function processCharacter(char)
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then processHumanoid(hum) end
+        for _, d in ipairs(char:GetDescendants()) do
+            if (d:IsA("BallSocketConstraint") or d:IsA("HingeConstraint") or d:IsA("RigidConstraint"))
+                and tostring(d.Name):find("RagdollConstraint") then
+                pcall(function() d:Destroy() end)
+            elseif d:IsA("Motor6D") and not d.Enabled then
+                pcall(function() d.Enabled = true end)
+            end
+        end
+        table.insert(conns, TrackConn(char.DescendantAdded:Connect(function(d)
+            if (d:IsA("BallSocketConstraint") or d:IsA("HingeConstraint") or d:IsA("RigidConstraint"))
+                and tostring(d.Name):find("RagdollConstraint") then
+                task.defer(function()
+                    pcall(function()
+                        if d and d.Parent then d:Destroy() end
+                    end)
+                end)
+            elseif d:IsA("Motor6D") and not d.Enabled then
+                task.defer(function()
+                    pcall(function()
+                        if d and d.Parent then d.Enabled = true end
+                    end)
+                end)
+            end
+        end)))
+    end
+
+    pcall(function()
+        local rs = game:GetService("ReplicatedStorage")
+        local Remotes = nil
+        pcall(function() Remotes = require(rs.Shared.Remotes) end)
+        if not Remotes then
+            pcall(function() Remotes = require(rs:FindFirstChild("Shared"):FindFirstChild("Remotes")) end)
+        end
+        if Remotes and Remotes.RigSync and Remotes.RigSync.Refresh then
+            local sig = Remotes.RigSync.Refresh.OnClientEvent
+            table.insert(conns, TrackConn(sig:Connect(function(payload)
+                if type(payload) ~= "string" then return end
+                local ok, decoded = pcall(function()
+                    return game:GetService("HttpService"):JSONDecode(payload)
+                end)
+                if not ok or type(decoded) ~= "table" then return end
+                local action = decoded.Action
+                if action == "BeginRagdoll" or action == "BeginImpulse" then
+                    graceActive = true
+                    lastGrace = os.clock() + 1.5
+                end
+            end)))
+        end
+    end)
+
+    TrackConn(localPlayer:GetAttributeChangedSignal("RagdollEndTime"):Connect(function()
+        local n = tonumber(localPlayer:GetAttribute("RagdollEndTime"))
+        if n and n > workspace:GetServerTimeNow() then
+            graceActive = true
+            lastGrace = os.clock() + 2.0
+        end
+    end))
+
+    TrackConn(localPlayer.CharacterAdded:Connect(function(c)
+        task.defer(processCharacter, c)
+    end))
+    if localPlayer.Character then task.defer(processCharacter, localPlayer.Character) end
+
+    TrackThread(task.spawn(function()
+        while XDG_MEM.Alive do
+            local c = localPlayer.Character
+            if c then processCharacter(c) end
+            if graceActive and os.clock() > lastGrace then graceActive = false end
+            task.wait(0.1)
+        end
+    end))
+
+    pcall(function()
+        local env = getgenv and getgenv() or _G
+        env.XDG_AntiKnockback = {
+            isGrace = function() return graceActive end,
+            graceUntil = function() return lastGrace end,
+        }
+    end)
+end)
+
+SafeRun("Enhance.HumanoidSwap", function()
+    local swapState = { original = nil, clone = nil, active = false }
+
+    local function chilliShieldActive()
+        if tbl4 and type(tbl4.Swapped) == "function" then
+            local ok, r = pcall(tbl4.Swapped)
+            if ok and r == true then return true end
+        end
+        return false
+    end
+
+    local function trySwap()
+        if swapState.active then return true end
+        if chilliShieldActive() then return false end
+        local char = localPlayer.Character
+        if not char then return false end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp then return false end
+        if hum:GetAttribute("__XDGSwap") then return true end
+
+        local archivable = char.Archivable
+        char.Archivable = true
+        local ok, clone = pcall(function() return hum:Clone() end)
+        char.Archivable = archivable
+        if not ok or not clone then return false end
+
+        local ws = hum.WalkSpeed
+        local jp = hum.JumpPower
+        local jh = hum.JumpHeight
+        local ujp = hum.UseJumpPower
+        local hh = hum.HipHeight
+        local ar = hum.AutoRotate
+        local mh = hum.MaxHealth
+        local h = hum.Health
+
+        clone.Name = "Humanoid"
+        clone:SetAttribute("__XDGSwap", true)
+        clone.Parent = char
+        hum:Destroy()
+
+        clone.WalkSpeed = ws
+        clone.JumpPower = jp
+        clone.JumpHeight = jh
+        clone.UseJumpPower = ujp
+        clone.HipHeight = hh
+        clone.AutoRotate = ar
+        clone.MaxHealth = mh
+        clone.Health = math.min(h, mh)
+
+        for _, st in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+            pcall(function() clone:SetStateEnabled(st, true) end)
+        end
+
+        pcall(function()
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
+
+        local cam = workspace.CurrentCamera
+        if cam then
+            cam.CameraType = Enum.CameraType.Custom
+            cam.CameraSubject = clone
+        end
+
+        local animate = char:FindFirstChild("Animate")
+        if animate then
+            animate.Disabled = true
+            task.wait()
+            animate.Disabled = false
+        end
+
+        task.defer(function()
+            if clone.Parent then
+                pcall(function() clone:ChangeState(Enum.HumanoidStateType.Running) end)
+            end
+        end)
+
+        swapState.original = hum
+        swapState.clone = clone
+        swapState.active = true
+        return true
+    end
+
+    local function undoSwap()
+        if not swapState.active then return end
+        local char = localPlayer.Character
+        local orig = swapState.original
+        local cl = swapState.clone
+        if orig and cl and char and orig.Parent == nil and cl.Parent == char then
+            pcall(function()
+                orig.Parent = char
+                cl:Destroy()
+            end)
+        end
+        swapState.original = nil
+        swapState.clone = nil
+        swapState.active = false
+    end
+
+    TrackConn(localPlayer.CharacterAdded:Connect(function()
+        swapState.active = false
+        swapState.original = nil
+        swapState.clone = nil
+    end))
+
+    TrackThread(task.spawn(function()
+        while XDG_MEM.Alive do
+            local c = localPlayer.Character
+            if c then
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                if hum and not hum:GetAttribute("__XDGSwap") and not chilliShieldActive() then
+                    pcall(trySwap)
+                end
+            end
+            task.wait(0.2)
+        end
+    end))
+
+    pcall(function()
+        local env = getgenv and getgenv() or _G
+        env.XDG_HumanoidSwap = {
+            enable = trySwap,
+            disable = undoSwap,
+            isActive = function() return swapState.active end,
+        }
+    end)
+end)
+
+SafeRun("Enhance.FreezePosition", function()
+    local state = { enabled = false, targetPos = nil, originalAnchored = nil }
+
+    local function isAntiKnockGrace()
+        if getgenv and getgenv().XDG_AntiKnockback and getgenv().XDG_AntiKnockback.isGrace then
+            local ok, r = pcall(getgenv().XDG_AntiKnockback.isGrace)
+            if ok and r == true then return true end
+        end
+        return false
+    end
+
+    local function anchorRoot(hrp)
+        if not hrp then return end
+        if state.originalAnchored == nil then
+            state.originalAnchored = hrp.Anchored
+        end
+        pcall(function()
+            hrp.Anchored = true
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end
+
+    local function restoreAnchor(hrp)
+        if not hrp then return end
+        if state.originalAnchored ~= nil then
+            pcall(function() hrp.Anchored = state.originalAnchored end)
+            state.originalAnchored = nil
+        end
+    end
+
+    TrackConn(RunService.Heartbeat:Connect(function()
+        if not state.enabled or not state.targetPos then return end
+        if isAntiKnockGrace() then
+            restoreAnchor(localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart"))
+            return
+        end
+        local char = localPlayer.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        anchorRoot(hrp)
+        pcall(function()
+            local rot = hrp.CFrame.Rotation
+            hrp.CFrame = CFrame.new(state.targetPos) * rot
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end))
+
+    TrackConn(localPlayer.CharacterRemoving:Connect(function()
+        state.enabled = false
+        state.targetPos = nil
+        state.originalAnchored = nil
+    end))
+
+    pcall(function()
+        local env = getgenv and getgenv() or _G
+        env.XDG_Freeze = {
+            set = function(pos, on)
+                if typeof(pos) == "Vector3" then state.targetPos = pos end
+                state.enabled = (on ~= false) and state.targetPos ~= nil
+            end,
+            setHere = function()
+                local hrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    state.targetPos = hrp.Position
+                    state.enabled = true
+                end
+            end,
+            clear = function()
+                state.enabled = false
+                state.targetPos = nil
+                restoreAnchor(localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart"))
+            end,
+            isActive = function() return state.enabled end,
+            getPos = function() return state.targetPos end,
+        }
+    end)
+end)
+
+-- ============================================================
 -- 速度卡片
 -- ============================================================
 local SpeedCard = AddFeature("绕过反作弊加速")
@@ -1476,13 +1822,9 @@ pcall(function()
     end
     print("-------------------------------------------")
     print("速度接口: getgenv().XDG_SmoothMove")
-    print("   .setSpeed(n)          -- 设置速度")
-    print("   .getSpeed()           -- 读取当前速度")
-    print("   .setSmoothFactor(0-1) -- 平滑度（默认 0.92）")
-    print("   .setLerpFactor(0-1)   -- lerp 因子（默认 0.35）")
-    print("   .setJitter(0.98, 1.02)-- 抖动范围")
-    print("   .getMode()            -- 'CFrame' 或 'Walk'")
-    print("   .isWalkAnimPlaying()  -- 检查走路动画是否在播")
+    print("Ping接口: getgenv().XDG_Ping.set(n, on)")
+    print("交换接口: getgenv().XDG_HumanoidSwap.enable() / .disable()")
+    print("冻结接口: getgenv().XDG_Freeze.setHere() / .clear()")
     print("===========================================")
 end)
 
@@ -1499,9 +1841,17 @@ TrackThread(task.spawn(function()
     local SCRIPT_URLS = {"https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"}
     for _, u in ipairs(SCRIPT_URLS) do
         local ok, raw = pcall(function() return game:HttpGet(u, true) end)
-        if ok and raw and raw ~= "" then
-            local ok2, err = pcall(function() return loadstring(raw)() end)
-            if not ok2 then pcall(function() warn("[XDG] 执行失败: " .. tostring(err)) end) end
+        if ok and raw and raw ~= "" and type(raw) == "string" then
+            local ok2, err = pcall(function()
+                local fn = loadstring(raw)
+                if type(fn) ~= "function" then error("loadstring 返回非函数") end
+                fn()
+            end)
+            if not ok2 then
+                pcall(function() warn("[XDG] 远程脚本执行失败: " .. tostring(err)) end)
+            end
+        else
+            pcall(function() warn("[XDG] 远程脚本拉取失败（跳过，不阻塞）: " .. tostring(u)) end)
         end
     end
 end))
