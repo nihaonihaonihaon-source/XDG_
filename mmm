@@ -1,5 +1,5 @@
---[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动
-     已移除 Ult-Killer 和 Uni-Bypass（会闪退）
+--[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动 v2
+     规则：速度 < 65 正常走路；速度 ≥ 65 把 WalkSpeed 归零，全靠 CFrame 插值
      Copyright (c) XDG Development Group All Rights Reserved. ]]
 
 local genv = getgenv and getgenv() or _G
@@ -105,7 +105,7 @@ local CoreGui = game:GetService("CoreGui")
 local localPlayer = Players.LocalPlayer
 
 -- ============================================================
--- UI 构建（XDG 原版）
+-- UI 构建
 -- ============================================================
 local Library = {}
 local COLOR = {
@@ -1109,7 +1109,8 @@ SafeRun("XDG.AntiFling", function()
 end)
 
 -- ============================================================
--- 【XDG 平滑 CFrame 移动模块】
+-- 【XDG 平滑 CFrame 移动模块 v2】
+-- 规则：速度 < 65 正常走路；速度 ≥ 65 把 WalkSpeed 归零，全靠 CFrame 插值
 -- ============================================================
 
 local SmoothMoveAPI = {}
@@ -1123,15 +1124,13 @@ SafeRun("XDG.SmoothMove", function()
     local UI_MIN, UI_MAX = 5, 300
     local TARGET_SPEED = 60
     local SPEED_STEP = 5
-    local MIN_SPEED = 16
-    local LAG_DIST = 5
-    local LAG_DOT = -0.5
-    local LAG_CD = 1.0
+    local WALK_THRESHOLD = 65
+    local NORMAL_WALKSPEED = 16
 
-    -- 平滑参数
-    local ACCEL = 8.0        -- 起步加速度（越大越快到达目标速度）
-    local DECEL = 10.0       -- 停止减速度
-    local SMOOTH_FACTOR = 0.35  -- 平滑因子（0-1，越大越"跟手"，越小越"飘"）
+    local SMOOTH_FACTOR = 0.65
+    local JITTER_MIN = 0.85
+    local JITTER_MAX = 1.15
+    local USE_RENDERSTEPPED = true
 
     local SP = false
     local US = TARGET_SPEED
@@ -1140,9 +1139,8 @@ SafeRun("XDG.SmoothMove", function()
     local HI = false
     local ORI = {}
     local SPF = {WalkSpeed=16, JumpPower=50, JumpHeight=7.2, HipHeight=2}
-    local currentVel = 0     -- 当前平滑速度
-    local lastPos = nil
-    local lagBackUntil = 0
+    local originalWalkSpeed = NORMAL_WALKSPEED
+    local walkSpeedZeroed = false
 
     local function IsGrounded()
         if not CH then return false end
@@ -1166,28 +1164,25 @@ SafeRun("XDG.SmoothMove", function()
             end
         end
         if CH.Sit or CH.PlatformStand then return true end
-        if os.clock() < lagBackUntil then return true end
         return false
     end
 
-    local function DetectLagBack()
-        if not CR or not CR.Parent or not CH or not CH.Parent then return end
-        local cur = CR.Position
-        local mv = CH.MoveDirection
-        if not lastPos then lastPos = cur return end
-        local delta = cur - lastPos
-        local dist = delta.Magnitude
-        lastPos = cur
-        if dist < LAG_DIST then return end
-        if mv.Magnitude < 0.1 then return end
-        local dot = delta.Unit:Dot(mv.Unit)
-        if dot < LAG_DOT then
-            lagBackUntil = os.clock() + LAG_CD
-            currentVel = 0
+    local function SetWalkSpeedZero(zero)
+        if not CH or not CH.Parent then return end
+        if zero and not walkSpeedZeroed then
+            pcall(function()
+                originalWalkSpeed = CH.WalkSpeed
+                CH.WalkSpeed = 0
+            end)
+            walkSpeedZeroed = true
+        elseif not zero and walkSpeedZeroed then
+            pcall(function()
+                CH.WalkSpeed = originalWalkSpeed > 0 and originalWalkSpeed or NORMAL_WALKSPEED
+            end)
+            walkSpeedZeroed = false
         end
     end
 
-    -- metatable hook（伪装 WalkSpeed 读数，不拦写入）
     local function InstallMetahook()
         if HI then return end
         if not (CAP.getrawmetatable and CAP.setreadonly) then return end
@@ -1207,6 +1202,9 @@ SafeRun("XDG.SmoothMove", function()
         local fi = function(s, k)
             if s ~= CH and s ~= CR then return oi(s, k) end
             if CH and s == CH and SPF[k] then
+                if k == "WalkSpeed" and walkSpeedZeroed then
+                    return originalWalkSpeed > 0 and originalWalkSpeed or NORMAL_WALKSPEED
+                end
                 local ok, v = pcall(oi, s, k)
                 if ok and v ~= nil then return v end
                 return SPF[k]
@@ -1225,70 +1223,43 @@ SafeRun("XDG.SmoothMove", function()
         HI = true
     end
 
-    -- ============ 平滑 CFrame 移动核心 ============
-    -- 关键：不直接写 AssemblyLinearVelocity，而是通过 CFrame 位移 + 平滑插值
     local function SmoothMove(dt)
         if not CR or not CR.Parent or not CH or not CH.Parent then return end
         if CH.Health <= 0 then return end
-        if IsSensitive() then
-            -- 敏感状态下平滑减速到 0
-            currentVel = currentVel - DECEL * dt * US
-            if currentVel < 0 then currentVel = 0 end
+
+        if US < WALK_THRESHOLD then
+            SetWalkSpeedZero(false)
             return
         end
-        if not IsGrounded() then
-            currentVel = currentVel - DECEL * dt * US
-            if currentVel < 0 then currentVel = 0 end
-            return
-        end
+
+        SetWalkSpeedZero(true)
+
+        if IsSensitive() then return end
+        if not IsGrounded() then return end
 
         local mv = CH.MoveDirection
-        local targetVel = 0
+        if mv.Magnitude < 0.01 then return end
 
-        if mv.Magnitude > 0.01 then
-            targetVel = math.min(US, UI_MAX)
-        else
-            targetVel = 0
-        end
-
-        -- 平滑逼近目标速度
-        if currentVel < targetVel then
-            currentVel = math.min(targetVel, currentVel + ACCEL * dt * US)
-        elseif currentVel > targetVel then
-            currentVel = math.max(targetVel, currentVel - DECEL * dt * US)
-        end
-
-        if currentVel < 0.1 then
-            currentVel = 0
-            return
-        end
-
-        -- 平滑移动：用 CFrame 逐帧位移
-        local pos = CR.Position
         local dir = Vector3.new(mv.X, 0, mv.Z)
-        if dir.Magnitude > 0.01 then
-            dir = dir.Unit
-        else
-            return
-        end
+        if dir.Magnitude < 0.01 then return end
+        dir = dir.Unit
 
-        -- 本帧的位移量
-        local step = currentVel * dt
+        local baseStep = US * dt
+        local jitter = JITTER_MIN + math.random() * (JITTER_MAX - JITTER_MIN)
+        local step = baseStep * jitter
+        local applyStep = step * SMOOTH_FACTOR
 
-        -- 用 SMOOTH_FACTOR 做"跟手感"，让角色不是瞬间跳到目标位置
-        local smoothStep = step * SMOOTH_FACTOR + (currentVel * dt * (1 - SMOOTH_FACTOR))
+        local pos = CR.Position
+        local newPos = pos + dir * applyStep
 
-        local newPos = pos + dir * smoothStep
-
-        local delta = newPos - pos
-        local flat = Vector3.new(delta.X, 0, delta.Z)
+        local flat = Vector3.new(dir.X, 0, dir.Z)
         local look = flat.Magnitude > 0.01
-            and CFrame.lookAt(Vector3.new(), flat.Unit)
+            and CFrame.lookAt(Vector3.new(), flat)
             or CR.CFrame.Rotation
 
         pcall(function()
             CR.CFrame = CFrame.new(newPos) * look
-            CR.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            CR.AssemblyLinearVelocity = Vector3.zero
             CR.AssemblyAngularVelocity = Vector3.zero
         end)
     end
@@ -1299,9 +1270,8 @@ SafeRun("XDG.SmoothMove", function()
             CH = ch:WaitForChild("Humanoid", 5)
             CR = ch:WaitForChild("HumanoidRootPart", 5)
             HI = false
-            currentVel = 0
-            lastPos = nil
-            lagBackUntil = 0
+            walkSpeedZeroed = false
+            originalWalkSpeed = CH and CH.WalkSpeed or NORMAL_WALKSPEED
             InstallMetahook()
         end))
     end
@@ -1309,41 +1279,52 @@ SafeRun("XDG.SmoothMove", function()
     if localPlayer.Character then OnChar(localPlayer.Character) end
     TrackConn(localPlayer.CharacterAdded:Connect(OnChar))
 
-    TrackConn(RunService.Heartbeat:Connect(function(dt)
+    local loopSignal = USE_RENDERSTEPPED and RunService.RenderStepped or RunService.Heartbeat
+    TrackConn(loopSignal:Connect(function(dt)
         pcall(function()
             if not SP then
-                currentVel = 0
+                if walkSpeedZeroed then SetWalkSpeedZero(false) end
                 return
             end
             if not CH or not CH.Parent or not CR or not CR.Parent then
-                currentVel = 0
+                if walkSpeedZeroed then SetWalkSpeedZero(false) end
                 return
             end
-            DetectLagBack()
             SmoothMove(dt)
         end)
+    end))
+
+    TrackConn(localPlayer.CharacterRemoving:Connect(function()
+        walkSpeedZeroed = false
     end))
 
     local function SetSpeed(v)
         v = tonumber(v) or TARGET_SPEED
         v = math.clamp(math.floor(v / SPEED_STEP + 0.5) * SPEED_STEP, UI_MIN, UI_MAX)
         US = v
-        SP = US > MIN_SPEED
-        if not SP then
-            currentVel = 0
+        SP = US > 16
+        if not SP and walkSpeedZeroed then
+            SetWalkSpeedZero(false)
         end
-        pcall(function() warn("[XDG-Speed] 速度设置为 " .. US) end)
+        pcall(function()
+            warn("[XDG-Speed] 速度 " .. US .. "（" .. (US >= WALK_THRESHOLD and "CFrame 模式" or "正常走路") .. "）")
+        end)
     end
 
     SmoothMoveAPI.setSpeed = SetSpeed
     SmoothMoveAPI.getSpeed = function() return US end
-    SmoothMoveAPI.getCurrentVel = function() return currentVel end
     SmoothMoveAPI.setSmoothFactor = function(v)
-        SMOOTH_FACTOR = math.clamp(tonumber(v) or 0.35, 0.05, 0.95)
+        SMOOTH_FACTOR = math.clamp(tonumber(v) or 0.65, 0.05, 1.0)
     end
-    SmoothMoveAPI.setAccel = function(a, d)
-        ACCEL = math.max(0.1, tonumber(a) or 8.0)
-        DECEL = math.max(0.1, tonumber(d) or 10.0)
+    SmoothMoveAPI.setJitter = function(minv, maxv)
+        JITTER_MIN = math.max(0.5, tonumber(minv) or 0.85)
+        JITTER_MAX = math.min(2.0, tonumber(maxv) or 1.15)
+    end
+    SmoothMoveAPI.setLoop = function(useRender)
+        USE_RENDERSTEPPED = useRender == true
+    end
+    SmoothMoveAPI.getMode = function()
+        return US >= WALK_THRESHOLD and "CFrame" or "Walk"
     end
 
     SetSpeed(TARGET_SPEED)
@@ -1390,9 +1371,9 @@ pcall(function()
     print("速度接口: getgenv().XDG_SmoothMove")
     print("   .setSpeed(n)          -- 设置速度")
     print("   .getSpeed()           -- 读取当前速度")
-    print("   .getCurrentVel()      -- 读取当前平滑速度")
-    print("   .setSmoothFactor(0-1) -- 设置平滑度（默认 0.35）")
-    print("   .setAccel(起, 停)     -- 设置加减速")
+    print("   .setSmoothFactor(0-1) -- 平滑度（默认 0.65）")
+    print("   .setJitter(0.85, 1.15)-- 抖动范围")
+    print("   .getMode()            -- 'CFrame' 或 'Walk'")
     print("===========================================")
 end)
 
