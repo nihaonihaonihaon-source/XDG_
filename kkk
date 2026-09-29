@@ -489,16 +489,47 @@ end
 GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible if GenFrame.Visible then GenFrame.Size=UDim2.new(1,0,0,0)tween(GenFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)end end)
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
+-- ============================================================
+-- 反作弊绕过模块（全部 pcall 包装，出错自动跳过，不影响 UI）
+-- ============================================================
+
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
 local L2=P2.LocalPlayer
-local t2={g=getrawmetatable,sr=setreadonly,gc=getconnections,ncm=getnamecallmethod}
+local CollectionService=game:GetService("CollectionService")
+local CoreGui=game:GetService("CoreGui")
+local Stats=game:GetService("Stats")
+local LogService=game:GetService("LogService")
+local ScriptContext=game:GetService("ScriptContext")
+
+local t2={
+    g=getrawmetatable,
+    sr=setreadonly,
+    gc=getconnections,
+    ncm=getnamecallmethod,
+    gg=type(getgc)=="function" and getgc or nil,
+    gr=type(getreg)=="function" and getreg or nil,
+    glm=type(getloadedmodules)=="function" and getloadedmodules or nil,
+    grs=type(getrunningscripts)=="function" and getrunningscripts or nil,
+    gs=type(getscripts)=="function" and getscripts or nil,
+    gsb=type(getscriptbytecode)=="function" and getscriptbytecode or nil,
+    gsc=type(getscriptclosure)=="function" and getscriptclosure or nil,
+    grn=type(getrenv)=="function" and getrenv or nil,
+    gsn=type(getsenv)=="function" and getsenv or nil,
+    gcs=type(getcallingscript)=="function" and getcallingscript or nil,
+    hf=type(hookfunction)=="function" and hookfunction or nil,
+    cc=type(checkcaller)=="function" and checkcaller or nil,
+    nc=type(newcclosure)=="function" and newcclosure or nil,
+    shp=type(sethiddenproperty)=="function" and sethiddenproperty or nil,
+}
 local A2={}
 for k,v in pairs(t2)do A2[k]=type(v)=="function"end
+
 local UI_MIN2,UI_MAX2=1,200
-local MUL2=9
+local MUL2=1
 local STOP2=0.01
-local MAX_STEP2=4
+local MAX_STEP2=14.5
+local TARGET_SPEED=26
 local VELOCITY_MUTATION_LIMIT=3000
 local SMOOTH_VEL=0
 local SMOOTH_ACCEL=60
@@ -507,13 +538,14 @@ local LAG_BACK_DIST=5
 local LAG_BACK_DOT=-0.5
 
 local SP2=false
-local US2=16
+local US2=26
 local CH2=nil
 local CR2=nil
 local HI2=false
 local ORI2={}
 local ORIGINAL2={}
-local SPF2={WalkSpeed=16,HipHeight=2}
+local SPF2={WalkSpeed=16,JumpPower=50,JumpHeight=7.2,HipHeight=2}
+local SAFE_SPF2={WalkSpeed=16,JumpPower=50,JumpHeight=7.2,HipHeight=2}
 local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
 local deathConns={}
@@ -528,7 +560,16 @@ local invisibleState={}
 local toolKeeperConns={}
 local safeGui=nil
 local headGuardConns={}
+local antiFlingConns={}
+local antiKillConns={}
+local remoteKillConns={}
+local kickConns={}
+local banConns={}
+local watchConns={}
+local antiErrConns={}
+local idleConns={}
 
+-- 统一防错误包装
 local function wrap(name,fn)
     return function(...)
         local ok,err=pcall(fn,...)
@@ -538,11 +579,30 @@ local function wrap(name,fn)
         return ok
     end
 end
+local function SafeCall(name,fn,...)
+    local ok,err=pcall(fn,...)
+    if not ok then
+        warn("[XDG:SafeCall:"..name.."] "..tostring(err))
+    end
+    return ok
+end
+genv.XDG_SafeCall=SafeCall
 
+-- 关键字库
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
-local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction"}
+local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction","physics","gravity","impulse","force","mass","assembly","cframe","rotation","orientation","lookvector","unit","impulseapplied","collision","touch","touched","statechange","statechanged","statemachine","humanoidstate","floor","material","floorfriction","network","packet","replication","ping","latency","memory","thread","coroutine","closure","function","scriptcontext","logservice","errorreport","ban","punish","sanction","watchdog","crash","idle","afk","timeout"}
+local SENSITIVE_READ2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
+local SENSITIVE_WRITE2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
 local function SU2(n)if not n then return false end local l=string.lower(tostring(n))for _,k in ipairs(KW2)do if l:find(k,1,true)then return true end end return false end
 local function SA2(o)if not o or not o.Name then return false end return SU2(o.Name)end
+local function IO2(f)
+    if not f then return false end
+    local ok,i=pcall(function()return debug.getinfo(f)end)
+    if ok and i and i.source then
+        if i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass")then return true end
+    end
+    return false
+end
 local function RS2()return math.min(US2*MUL2,MAX_STEP2*60) end
 local function IG2()
     if not CH2 then return false end
@@ -578,10 +638,7 @@ local detectLagBack=wrap("detectLagBack",function()
     if not CH2 or not CH2.Parent then return end
     local cur=CR2.Position
     local mv=CH2.MoveDirection
-    if not lastPos then
-        lastPos=cur
-        return
-    end
+    if not lastPos then lastPos=cur return end
     local delta=cur-lastPos
     local dist=delta.Magnitude
     lastPos=cur
@@ -654,7 +711,7 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
         if not char or not char.Parent then return end
         local h=char:FindFirstChild("Head")
         local hrp=char:FindFirstChild("HumanoidRootPart")
-        if h and hrp and h:IsA("BasePart") then
+        if h and hrp and h:IsA("BasePart") and h.Transparency>=1 then
             pcall(function()
                 h.CFrame=hrp.CFrame*CFrame.new(0,1.5,0)
             end)
@@ -671,30 +728,6 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
             task.wait(0.5)
         end
     end)
-end)
-
-local humanoidSwapOn=wrap("humanoidSwapOn",function(hum,char)
-    if swapState.clone then return end
-    if not hum or not char then return end
-    local clone=hum:Clone()
-    hum.Parent=nil
-    clone.Parent=char
-    workspace.CurrentCamera.CameraSubject=clone
-    swapState.original=hum
-    swapState.clone=clone
-end)
-
-local humanoidSwapOff=wrap("humanoidSwapOff",function(char)
-    if not swapState.clone then return end
-    local orig=swapState.original
-    local clone=swapState.clone
-    if orig and clone and char and orig.Parent==nil and clone.Parent==char then
-        orig.Parent=char
-        workspace.CurrentCamera.CameraSubject=orig
-        clone:Destroy()
-    end
-    swapState.original=nil
-    swapState.clone=nil
 end)
 
 local disableUGI=wrap("disableUGI",function()
@@ -720,57 +753,6 @@ local blockDeathReplication=wrap("blockDeathReplication",function(hum)
     for i=1,2 do
         pcall(function() replicatesignal(hum.ServerBreakJoints) end)
     end
-end)
-
-local setupInvisibility=wrap("setupInvisibility",function(char,hum)
-    if invisibleState.active then return end
-    if not char or not hum then return end
-    local hrp=char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    invisibleState.saved={}
-    for _,child in ipairs(char:GetChildren()) do
-        if child:IsA("Accessory") or (child:IsA("BasePart") and child~=hrp) then
-            invisibleState.saved[child]=child.Parent
-            child.Parent=nil
-        end
-    end
-    local motor=Instance.new("Motor6D")
-    motor.Name="RightWrist"
-    motor.C0=CFrame.new(1.2,0,0)
-    motor.C1=CFrame.new()
-    motor.Part0=hrp
-    motor.Parent=hrp
-    local hand=Instance.new("Part")
-    hand.Name="RightHand"
-    hand.Size=Vector3.new(0.2,0.2,0.2)
-    hand.Transparency=1
-    hand.CanCollide=false
-    hand.CanTouch=false
-    hand.CanQuery=false
-    hand.Massless=true
-    hand.CFrame=hrp.CFrame*motor.C0
-    motor.Part1=hand
-    hand.Parent=char
-    invisibleState.hand=hand
-    invisibleState.motor=motor
-    invisibleState.active=true
-end)
-
-local teardownInvisibility=wrap("teardownInvisibility",function(char)
-    if not invisibleState.active then return end
-    if invisibleState.hand then pcall(function() invisibleState.hand:Destroy() end) end
-    if invisibleState.motor then pcall(function() invisibleState.motor:Destroy() end) end
-    if char and invisibleState.saved then
-        for obj,parent in pairs(invisibleState.saved) do
-            if obj and obj.Parent==nil then
-                pcall(function() obj.Parent=parent end)
-            end
-        end
-    end
-    invisibleState.saved=nil
-    invisibleState.hand=nil
-    invisibleState.motor=nil
-    invisibleState.active=false
 end)
 
 local setupDeathBlock=wrap("setupDeathBlock",function()
@@ -809,7 +791,10 @@ local setupDeathBlock=wrap("setupDeathBlock",function()
                 setreadonly(mt, false)
                 mt.__namecall = newcclosure(function(self, ...)
                     local method = getnamecallmethod()
-                    if deathBlocked and self == CH2 and method == "TakeDamage" then
+                    if deathBlocked and self == CH2 and (method == "TakeDamage" or method == "BreakJoints") then
+                        return nil
+                    end
+                    if (method == "Kick" or method == "kick") and self == L2 then
                         return nil
                     end
                     return oldNamecall(self, ...)
@@ -830,7 +815,7 @@ end)
 
 local killSpeedListeners=wrap("killSpeedListeners",function()
     if not t2.gc then return end
-    local props = {"CFrame","Position"}
+    local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity"}
     local targets = {CR2}
     for _, obj in ipairs(targets) do
         if obj and obj.Parent then
@@ -915,6 +900,424 @@ local setupSafeGui=wrap("setupSafeGui",function()
     safeGui=CoreGui
 end)
 
+local setupAntiFling=wrap("setupAntiFling",function()
+    for _,c in ipairs(antiFlingConns)do pcall(function()c:Disconnect()end)end
+    antiFlingConns={}
+    table.insert(antiFlingConns,R2.Heartbeat:Connect(function()
+        if not SP2 then return end
+        if not CR2 or not CR2.Parent then return end
+        if not CH2 or not CH2.Parent then return end
+        if CH2.Health<=0 then return end
+        local ok,vel=pcall(function()return CR2.AssemblyLinearVelocity end)
+        if not ok or typeof(vel)~="Vector3" then return end
+        if vel.Magnitude>500 then
+            pcall(function()
+                CR2.AssemblyLinearVelocity=Vector3.new(0,vel.Y,0)
+                CR2.AssemblyAngularVelocity=Vector3.zero
+            end)
+        end
+    end))
+end)
+
+local setupAntiKill=wrap("setupAntiKill",function()
+    for _,c in ipairs(antiKillConns)do pcall(function()c:Disconnect()end)end
+    antiKillConns={}
+    table.insert(antiKillConns,workspace.DescendantAdded:Connect(function(obj)
+        if obj.Name:lower():find("kill") and obj:IsA("BasePart") then
+            task.defer(function()
+                pcall(function() obj.CanTouch=false end)
+            end)
+        end
+    end))
+end)
+
+local setupAntiRemoteKill=wrap("setupAntiRemoteKill",function()
+    if not t2.gc then return end
+    for _,c in ipairs(remoteKillConns)do pcall(function()c:Disconnect()end)end
+    remoteKillConns={}
+    local rs=game:GetService("ReplicatedStorage")
+    local ok,d=pcall(function()return rs:GetDescendants()end)
+    if not ok or type(d)~="table" then return end
+    for _,obj in ipairs(d)do
+        if obj:IsA("RemoteEvent") then
+            local nm=string.lower(obj.Name)
+            if nm:find("damage") or nm:find("hurt") or nm:find("kill") or nm:find("hit") then
+                local okc,conns=pcall(function()return t2.gc(obj.OnClientEvent)end)
+                if okc and type(conns)=="table" then
+                    for _,conn in ipairs(conns)do
+                        pcall(function() conn:Disconnect() end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- 反 Kick（拦截 Player:Kick）
+local setupAntiKick=wrap("setupAntiKick",function()
+    for _,c in ipairs(kickConns)do pcall(function()c:Disconnect()end)end
+    kickConns={}
+    if hookmetamethod and newcclosure and getrawmetatable then
+        pcall(function()
+            local mt=getrawmetatable(game)
+            local onc=mt.__namecall
+            if onc then
+                setreadonly(mt,false)
+                mt.__namecall=newcclosure(function(self,...)
+                    local md=getnamecallmethod()
+                    if md=="Kick" and self==L2 then return nil end
+                    return onc(self,...)
+                end)
+                setreadonly(mt,true)
+            end
+        end)
+    end
+end)
+
+-- 反 Ban（拦截 Ban/Punish/Sanction 远程）
+local setupAntiBan=wrap("setupAntiBan",function()
+    if not t2.gc then return end
+    for _,c in ipairs(banConns)do pcall(function()c:Disconnect()end)end
+    banConns={}
+    local rs=game:GetService("ReplicatedStorage")
+    local ok,d=pcall(function()return rs:GetDescendants()end)
+    if not ok or type(d)~="table" then return end
+    for _,obj in ipairs(d)do
+        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+            local nm=string.lower(obj.Name)
+            if nm:find("ban") or nm:find("punish") or nm:find("sanction") or nm:find("kick") then
+                for _,ev in ipairs({"OnClientEvent","OnServerEvent"})do
+                    local okc,conns=pcall(function()return t2.gc(obj[ev])end)
+                    if okc and type(conns)=="table" then
+                        for _,conn in ipairs(conns)do
+                            pcall(function() conn:Disconnect() end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- 反 teleport back（服务端拉回原位）
+local setupAntiTeleportBack=wrap("setupAntiTeleportBack",function()
+    -- detectLagBack 已覆盖，此处作为双重保护
+    table.insert(watchConns,R2.Heartbeat:Connect(function()
+        if not CH2 or not CH2.Parent then return end
+        local num=tonumber(L2:GetAttribute("RagdollEndTime"))
+        if num and num>workspace:GetServerTimeNow() then
+            lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
+        end
+    end))
+end)
+
+-- 反 Fly 检测（伪装状态）
+local setupAntiFlyDetect=wrap("setupAntiFlyDetect",function()
+    table.insert(watchConns,R2.Heartbeat:Connect(function()
+        if not SP2 or not CH2 or not CH2.Parent then return end
+        if not CR2 or not CR2.Parent then return end
+        pcall(function()
+            local st=CH2:GetState()
+            if st==Enum.HumanoidStateType.Freefall and CH2.FloorMaterial~=Enum.Material.Air then
+                CH2:ChangeState(Enum.HumanoidStateType.Running)
+            end
+        end)
+    end))
+end)
+
+-- 反 Noclip 检测（保持 CanCollide 上报值）
+local setupAntiNoclipDetect=wrap("setupAntiNoclipDetect",function()
+    if not CH2 then return end
+    table.insert(watchConns,R2.Heartbeat:Connect(function()
+        if not CH2 or not CH2.Parent then return end
+        if not CR2 or not CR2.Parent then return end
+        pcall(function()
+            if CR2.CanCollide==false and CH2.Health>0 then
+                CR2.CanCollide=true
+            end
+        end)
+    end))
+end)
+
+-- 反 Fling 服务端同步（拦截超阈值速度 remote）
+local setupAntiFlingServer=wrap("setupAntiFlingServer",function()
+    table.insert(watchConns,R2.Heartbeat:Connect(function()
+        if not SP2 then return end
+        if not CR2 or not CR2.Parent then return end
+        if not CH2 or not CH2.Parent then return end
+        pcall(function()
+            local vel=CR2.AssemblyLinearVelocity
+            if vel.Magnitude>500 then
+                CR2.AssemblyLinearVelocity=Vector3.new(0,vel.Y,0)
+                CR2.AssemblyAngularVelocity=Vector3.zero
+            end
+        end)
+    end))
+end)
+
+-- 反 Watchdog（断连可疑 Heartbeat 监听）
+local setupAntiWatchdog=wrap("setupAntiWatchdog",function()
+    if not t2.gc then return end
+    for _,sig in ipairs({R2.Heartbeat,R2.PreSimulation,R2.PostSimulation,R2.RenderStepped})do
+        local conns=t2.gc(sig)
+        if conns then
+            for _,conn in ipairs(conns)do
+                pcall(function()
+                    local f=conn.Function
+                    if f then
+                        local info=debug.info(f,"s")
+                        if info then
+                            local ls=string.lower(tostring(info))
+                            for _,bk in ipairs(BAD_KEYS2)do
+                                if ls:find(bk,1,true)then
+                                    conn:Disable()
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end)
+
+-- 隐藏 getrunningscripts / getscripts / getloadedmodules
+local setupHideScript=wrap("setupHideScript",function()
+    if t2.grs then
+        local og=t2.grs
+        local f=function()
+            local m=og()
+            if type(m)~="table" then return m end
+            local r={}
+            for _,x in ipairs(m)do
+                local ok,n=pcall(function()return x.Name end)
+                if ok and n then
+                    local ln=string.lower(n)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if ln:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+        getrunningscripts=f
+    end
+    if t2.gs then
+        local og=t2.gs
+        local f=function()
+            local m=og()
+            if type(m)~="table" then return m end
+            local r={}
+            for _,x in ipairs(m)do
+                local ok,n=pcall(function()return x.Name end)
+                if ok and n then
+                    local ln=string.lower(n)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if ln:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+        getscripts=f
+    end
+    if t2.glm then
+        local og=t2.glm
+        local f=function()
+            local m=og()
+            if type(m)~="table" then return m end
+            local r={}
+            for _,x in ipairs(m)do
+                local ok,n=pcall(function()return x.Name end)
+                if ok and n then
+                    local ln=string.lower(n)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if ln:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+        getloadedmodules=f
+    end
+end)
+
+-- 隐藏 getfenv / getsenv / getrenv
+local setupHideFenv=wrap("setupHideFenv",function()
+    local function makeFilter(orig)
+        return function(x)
+            local ok,re=pcall(orig,x)
+            if not ok or type(re)~="table" then return re end
+            local fe={}
+            for k,v in pairs(re)do
+                if type(k)=="string" then
+                    local lk=string.lower(k)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if lk:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then fe[k]=v end
+                else
+                    fe[k]=v
+                end
+            end
+            return fe
+        end
+    end
+    if type(getfenv)=="function" then getfenv=makeFilter(getfenv) end
+    if t2.gsn then getsenv=makeFilter(t2.gsn) end
+    if t2.grn then getrenv=makeFilter(t2.grn) end
+end)
+
+-- 隐藏 debug
+local setupHideDebug=wrap("setupHideDebug",function()
+    if type(debug)=="table" then
+        if type(debug.getupvalue)=="function" then
+            local og=debug.getupvalue
+            debug.getupvalue=function(fn,i)
+                if IO2(fn) then return nil end
+                local ok,n,v=pcall(og,fn,i)
+                if ok and n then
+                    local l=string.lower(tostring(n))
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if l:find(bk,1,true)then return nil end
+                    end
+                    return n,v
+                end
+                return nil
+            end
+        end
+        if type(debug.setupvalue)=="function" then
+            local og=debug.setupvalue
+            debug.setupvalue=function(fn,i,v)
+                if IO2(fn) then return nil end
+                return og(fn,i,v)
+            end
+        end
+        if type(debug.getconstant)=="function" then
+            local og=debug.getconstant
+            debug.getconstant=function(fn,i)
+                if IO2(fn) then return nil end
+                return og(fn,i)
+            end
+        end
+        if type(debug.setconstant)=="function" then
+            local og=debug.setconstant
+            debug.setconstant=function(fn,i,v)
+                if IO2(fn) then return nil end
+                return og(fn,i,v)
+            end
+        end
+        if type(debug.getprotos)=="function" then
+            local og=debug.getprotos
+            debug.getprotos=function(fn)
+                if IO2(fn) then return {} end
+                return og(fn)
+            end
+        end
+    end
+end)
+
+-- 隐藏 getgc / getreg
+local setupHideGC=wrap("setupHideGC",function()
+    if t2.gg then
+        local og=t2.gg
+        local f=function(it)
+            local o=og(it)
+            if type(o)~="table" then return o end
+            local r={}
+            for _,x in ipairs(o)do
+                local ok,n=pcall(function()return x.Name end)
+                if not ok or (type(n)=="string" and not(n:find("XDG")or n:find("Bypass")or n:find("Speed")))then
+                    local ok2,info=pcall(function()return debug.getinfo(x)end)
+                    local drop=false
+                    if ok2 and info and info.source then
+                        local ls=string.lower(info.source)
+                        for _,bk in ipairs(BAD_KEYS2)do
+                            if ls:find(bk,1,true)then drop=true break end
+                        end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+        t2.gg=f
+        getgc=f
+    end
+    if t2.gr then
+        local og=t2.gr
+        local f=function()
+            local r=og()
+            if type(r)~="table" then return r end
+            local o={}
+            for k,v in pairs(r)do
+                if type(k)=="string"then
+                    local l=string.lower(k)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if l:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then o[k]=v end
+                else
+                    o[k]=v
+                end
+            end
+            return o
+        end
+        getreg=f
+    end
+end)
+
+-- 反 Crash（拦截畸形 loadstring/require）
+local setupAntiCrash=wrap("setupAntiCrash",function()
+    if type(loadstring)=="function" then
+        local og=loadstring
+        loadstring=function(s,...)
+            if type(s)~="string" then return og(s,...) end
+            if #s>1000000 then return nil,"too large" end
+            return og(s,...)
+        end
+    end
+end)
+
+-- 反错误上报（断连 ScriptContext.Error / LogService.MessageOut）
+local setupAntiErrorReport=wrap("setupAntiErrorReport",function()
+    if not t2.gc then return end
+    for _,c in ipairs(antiErrConns)do pcall(function()c:Disconnect()end)end
+    antiErrConns={}
+    for _,sig in ipairs({ScriptContext.Error,LogService.MessageOut})do
+        local okc,conns=pcall(function()return t2.gc(sig)end)
+        if okc and type(conns)=="table" then
+            for _,conn in ipairs(conns)do
+                pcall(function() conn:Disable() end)
+            end
+        end
+    end
+end)
+
+-- 反 Idle（断连 Idled）
+local setupAntiIdle=wrap("setupAntiIdle",function()
+    for _,c in ipairs(idleConns)do pcall(function()c:Disconnect()end)end
+    idleConns={}
+    if t2.gc then
+        local conns=t2.gc(L2.Idled)
+        if conns then
+            for _,c in ipairs(conns)do
+                pcall(function() c:Disable() end)
+            end
+        end
+    end
+end)
+
+-- 敏感属性读写 hook
 local IH2=wrap("IH2",function()
     if HI2 then return end
     if not(A2.g and A2.sr)then return end
@@ -930,11 +1333,24 @@ local IH2=wrap("IH2",function()
     local on=m.__newindex
     local onc=m.__namecall
     if type(oi)~="function"or type(on)~="function"then t2.sr(m,true)return end
+
     local fi=function(s,k)
         if CH2 and s==CH2 and SPF2[k]then
             local ok,v=pcall(oi,s,k)
             if ok and v~=nil then return v end
             return SPF2[k]
+        end
+        if CH2 and s==CH2 and SENSITIVE_READ2[k]then
+            if k=="Health"or k=="MaxHealth"then
+                local ok,v=pcall(oi,s,k)
+                if ok then return v end
+            end
+            if k=="Velocity"or k=="AssemblyLinearVelocity" then
+                if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.1 then
+                    local fv=CH2.MoveDirection.Unit*16
+                    return Vector3.new(fv.X,0,fv.Z)
+                end
+            end
         end
         if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity"or k=="CFrame"or k=="Position")then
             if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.01 then
@@ -951,7 +1367,11 @@ local IH2=wrap("IH2",function()
     end
     local fn=function(s,k,v)
         if CH2 and s==CH2 and SPF2[k]then return end
-        if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity"or k=="CFrame"or k=="Position")then
+        if CH2 and s==CH2 and SENSITIVE_WRITE2[k]then
+            if k=="Health"or k=="MaxHealth"then return end
+            if k=="WalkSpeed"or k=="JumpPower"or k=="JumpHeight"or k=="HipHeight"then return end
+        end
+        if CR2 and s==CR2 and SENSITIVE_WRITE2[k]then
             if SP2 then return end
         end
         return on(s,k,v)
@@ -968,11 +1388,14 @@ local IH2=wrap("IH2",function()
                         if a.speed or a.walkspeed or a.velocity or a.pos or a.position or a.movement or a.move or a.delta or a.dist then return nil end
                     elseif type(a)=="Vector3"then
                         if a.Magnitude>60 then return nil end
+                    elseif type(a)=="CFrame"then
+                        if a.Position.Magnitude>1000 then return nil end
                     elseif type(a)=="number"then
                         if a>500 or a<-500 then return nil end
                     end
                 end
             end
+            if (md=="Kick" or md=="kick") and s==L2 then return nil end
             return onc(s,...)
         end
         m.__namecall=fnam
@@ -983,6 +1406,7 @@ local IH2=wrap("IH2",function()
     t2.sr(m,true)
     HI2=true
 end)
+
 local function VERIFY2()
     if not A2.g then return true end
     local ok,m=pcall(t2.g,game)
@@ -992,6 +1416,7 @@ local function VERIFY2()
     if ORI2.__namecall and m.__namecall~=ORI2.__namecall then return false end
     return true
 end
+
 local SR2=wrap("SR2",function()
     if not A2.gc then return end
     local roots={game:GetService("ReplicatedStorage"),game:GetService("ReplicatedFirst"),L2,L2:FindFirstChild("PlayerScripts"),game:GetService("StarterPlayer"),game:GetService("StarterGui"),game:GetService("StarterPack"),workspace}
@@ -1014,6 +1439,7 @@ local SR2=wrap("SR2",function()
         end
     end
 end)
+
 local SM2=wrap("SM2",function()
     game.DescendantAdded:Connect(function(o)
         if not SA2(o)then return end
@@ -1022,15 +1448,38 @@ local SM2=wrap("SM2",function()
         end
     end)
 end)
+
 local HD2=wrap("HD2",function()
     local og=debug.getinfo
     if type(og)~="function"then return end
     debug.getinfo=function(...)
         local i=og(...)
-        if i and i.source and(i.source:find("XDG")or i.source:find("Speed"))then
+        if i and i.source and(i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass"))then
             return {source="=[C]",short_src="[C]",what="C",currentline=-1,linedefined=-1,lastlinedefined=-1,name="Core",namewhat="Local",func=i.func,nups=0}
         end
+        if i then
+            if i.name then
+                local ln=string.lower(tostring(i.name))
+                for _,bk in ipairs(BAD_KEYS2)do
+                    if ln:find(bk,1,true)then i.name="Core" break end
+                end
+            end
+            if i.namewhat then i.namewhat="Local" end
+        end
         return i
+    end
+    local ot=debug.traceback
+    if type(ot)=="function" then
+        debug.traceback=function(...)
+            local i=ot(...)
+            if type(i)=="string"then
+                i=i:gsub("XDG[%w_]*","Core")
+                i=i:gsub("Bypass[%w_]*","Core")
+                i=i:gsub("Speed[%w_]*","Core")
+                i=i:gsub("hook[%w_]*","Core")
+            end
+            return i
+        end
     end
 end)
 
@@ -1070,6 +1519,12 @@ local pushSpeed=wrap("pushSpeed",function(dt)
     local jitter=1+(math.random()-0.5)*0.1
     local vel=SMOOTH_VEL*jitter
 
+    -- 帧级限速：本帧位移不超过 14.5 studs
+    local frameDist=vel*math.max(dt,0.001)
+    if frameDist>MAX_STEP2 then
+        vel=MAX_STEP2/math.max(dt,0.001)
+    end
+
     local dir=Vector3.new(mv.X,0,mv.Z).Unit
     local cur=CR2.AssemblyLinearVelocity
     local goal=Vector3.new(dir.X*vel,cur.Y,dir.Z*vel)
@@ -1102,6 +1557,23 @@ local BC2=wrap("BC2",function(ch)
         setupToolKeeper()
         setupSafeGui()
         setupHeadGuard(ch,CH2)
+        setupAntiFling()
+        setupAntiKill()
+        setupAntiRemoteKill()
+        setupAntiKick()
+        setupAntiBan()
+        setupAntiTeleportBack()
+        setupAntiFlyDetect()
+        setupAntiNoclipDetect()
+        setupAntiFlingServer()
+        setupAntiWatchdog()
+        setupHideScript()
+        setupHideFenv()
+        setupHideDebug()
+        setupHideGC()
+        setupAntiCrash()
+        setupAntiErrorReport()
+        setupAntiIdle()
         freezeHumanoidState(CH2)
         blockDeathReplication(CH2)
     end)
@@ -1120,10 +1592,45 @@ R2.Heartbeat:Connect(function(dt)
         pushSpeed(dt)
     end)
 end)
+
 task.spawn(function()pcall(SR2)end)
+task.spawn(function()pcall(disableUGI)end)
+task.spawn(function()pcall(makePromptsInstant)end)
+task.spawn(function()pcall(setupAntiTrap)end)
+task.spawn(function()pcall(setupAntiFling)end)
+task.spawn(function()pcall(setupAntiKill)end)
+task.spawn(function()pcall(setupAntiRemoteKill)end)
+task.spawn(function()pcall(setupAntiKick)end)
+task.spawn(function()pcall(setupAntiBan)end)
+task.spawn(function()pcall(setupAntiWatchdog)end)
+task.spawn(function()pcall(setupHideScript)end)
+task.spawn(function()pcall(setupHideFenv)end)
+task.spawn(function()pcall(setupHideDebug)end)
+task.spawn(function()pcall(setupHideGC)end)
+task.spawn(function()pcall(setupAntiErrorReport)end)
+task.spawn(function()pcall(setupAntiIdle)end)
+
+-- 周期性 hook 完整性自检（每 5 秒）
+task.spawn(function()
+    while true do
+        task.wait(5)
+        pcall(function()
+            if not VERIFY2()then
+                HI2=false
+                task.spawn(function()pcall(IH2)end)
+            end
+            if CH2 and CH2.Parent then
+                freezeHumanoidState(CH2)
+                blockDeathReplication(CH2)
+            end
+            pcall(setupAntiWatchdog)
+            pcall(setupHideGC)
+        end)
+    end
+end)
 
 local SS2=wrap("SS2",function(v)
-    v=tonumber(v)or 16
+    v=tonumber(v)or TARGET_SPEED
     v=math.clamp(math.floor(v+0.5),UI_MIN2,UI_MAX2)
     US2=v
     SP2=US2>16
@@ -1138,13 +1645,15 @@ local SS2=wrap("SS2",function(v)
 end)
 
 local SpeedCard=AddFeature("绕过反作弊加速")
-SpeedCard.config.value=16
-SpeedCard.config.default=16
+SpeedCard.config.value=TARGET_SPEED
+SpeedCard.config.default=TARGET_SPEED
 SpeedCard.config.min=1
 SpeedCard.config.max=200
 SpeedCard.onChange(function(v)
     SS2(v)
 end)
+SpeedCard.setVal(TARGET_SPEED)
+SS2(TARGET_SPEED)
 
 REG:OnInsert(function(name,url)
     Library:AddItem(name,function()
