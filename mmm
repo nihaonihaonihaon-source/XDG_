@@ -14,9 +14,6 @@ if genv.XDG_UI_Loaded then
 end
 genv.XDG_UI_Loaded = true
 
--- ============================================================
--- 顶部远程脚本（最先执行，报错跳过）
--- ============================================================
 pcall(function()
     local ok, err = pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/Lutosys/opensrc/refs/heads/main/stealaeggspeedbypass.lua"))()
@@ -28,9 +25,6 @@ pcall(function()
     end
 end)
 
--- ============================================================
--- 反作弊旁路
--- ============================================================
 pcall(function()
     if type(getgc) ~= "function" or type(getrawmetatable) ~= "function" or type(setmetatable) ~= "function" then
         warn("[XDG-Bypass] 执行器缺少 getgc/getrawmetatable/setmetatable，跳过")
@@ -55,15 +49,58 @@ pcall(function()
     print("[XDG-Bypass] 反作弊旁路已应用，锁定表数量: " .. tostring(locked))
 end)
 
--- ============================================================
--- Humanoid 替换绕过
--- ============================================================
 pcall(function()
     local Players = game:GetService("Players")
     local localPlayer = Players.LocalPlayer
+
+    local function rebindControls()
+        pcall(function()
+            local ps = localPlayer:FindFirstChild("PlayerScripts")
+            if not ps then return end
+            local pm = ps:FindFirstChild("PlayerModule")
+            if not pm then return end
+            local ok, module = pcall(function() return require(pm) end)
+            if not ok or not module then return end
+            local controls = module:GetControls()
+            if controls then
+                pcall(function() controls:Disable() end)
+                task.wait(0.05)
+                pcall(function() controls:Enable() end)
+            end
+        end)
+    end
+
+    local function rebindAnimate(character)
+        local animate = character:FindFirstChild("Animate")
+        if not animate then return end
+        if not animate:IsA("LocalScript") then return end
+        pcall(function()
+            animate.Disabled = true
+            task.wait()
+            animate.Disabled = false
+        end)
+    end
+
+    local function rebindCamera(hum)
+        local cam = workspace.CurrentCamera
+        if cam then
+            pcall(function() cam.CameraSubject = hum end)
+        end
+    end
+
+    local function rebindStates(hum)
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Running)
+        end)
+        for _, st in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+            pcall(function() hum:SetStateEnabled(st, true) end)
+        end
+    end
+
     local function replaceHumanoid(character)
         local oldHum = character:FindFirstChildOfClass("Humanoid")
         if not oldHum then return end
+
         local cam = workspace.CurrentCamera
         local animate = character:FindFirstChild("Animate")
         local ws = oldHum.WalkSpeed
@@ -71,63 +108,99 @@ pcall(function()
         local jh = oldHum.JumpHeight
         local hp = oldHum.Health
         local mhp = oldHum.MaxHealth
-        if animate and animate:IsA("LocalScript") then animate.Disabled = true end
+        local ujp = oldHum.UseJumpPower
+        local hh = oldHum.HipHeight
+        local ar = oldHum.AutoRotate
+
+        if animate and animate:IsA("LocalScript") then
+            pcall(function() animate.Disabled = true end)
+        end
+
         local anim = oldHum:FindFirstChildOfClass("Animator")
         if anim then
             for _, track in next, anim:GetPlayingAnimationTracks() do
-                track:Stop(0)
+                pcall(function() track:Stop(0) end)
             end
         end
+
         oldHum.Archivable = true
         local clone = oldHum:Clone()
         for _, child in next, clone:GetChildren() do
             if child:IsA("Animator") then child:Destroy() end
         end
+
         oldHum.Name = "_OldHumanoid"
         clone.Name = "Humanoid"
         clone.Parent = character
+
         local newAnim = Instance.new("Animator")
         newAnim.Parent = clone
+
         clone.WalkSpeed = ws
         clone.JumpPower = jp
         clone.JumpHeight = jh
         clone.MaxHealth = mhp
         clone.Health = math.min(hp, mhp)
-        if cam then cam.CameraSubject = clone end
+        clone.UseJumpPower = ujp
+        clone.HipHeight = hh
+        clone.AutoRotate = ar
+
+        if cam then
+            pcall(function() cam.CameraSubject = clone end)
+        end
+
         oldHum:Destroy()
+
         if animate and animate:IsA("LocalScript") then
             task.wait()
-            animate.Disabled = false
+            pcall(function() animate.Disabled = false end)
             task.defer(function()
-                if animate.Parent then
-                    animate.Disabled = true
+                if animate and animate.Parent then
+                    pcall(function() animate.Disabled = true end)
                     task.wait()
-                    animate.Disabled = false
+                    pcall(function() animate.Disabled = false end)
                 end
             end)
         end
+
         task.defer(function()
+            rebindControls()
+        end)
+        task.defer(function()
+            rebindCamera(clone)
+        end)
+        task.defer(function()
+            rebindStates(clone)
+        end)
+
+        task.delay(0.3, function()
             if clone.Parent then
-                clone:ChangeState(Enum.HumanoidStateType.Running)
+                rebindCamera(clone)
+                rebindStates(clone)
+                rebindControls()
+                rebindAnimate(character)
             end
         end)
+
         return clone
     end
+
     local function onCharacter(char)
         char:WaitForChild("Humanoid")
         task.wait()
         replaceHumanoid(char)
     end
-    if localPlayer.Character then task.spawn(onCharacter, localPlayer.Character) end
+
+    if localPlayer.Character then
+        task.spawn(onCharacter, localPlayer.Character)
+    end
     localPlayer.CharacterAdded:Connect(function(char)
         task.spawn(onCharacter, char)
     end)
-    print("[XDG-Humanoid] Humanoid 替换绕过已启动")
+
+    print("[XDG-Humanoid] Humanoid 替换绕过已启动（含控制器/动画重绑）")
 end)
 
--- ============================================================
--- 注册中心
--- ============================================================
 genv.XDG_REG_KEY_2026 = genv.XDG_REG_KEY_2026 or {}
 local REG = genv.XDG_REG_KEY_2026
 REG.Scripts = REG.Scripts or {}
@@ -186,9 +259,6 @@ function REG:OnInsertLog(cb)
     for _, l in ipairs(self.Logs) do pcall(cb, l.Date, l.Scripts) end
 end
 
--- ============================================================
--- UI 库
--- ============================================================
 local Library = {}
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -673,9 +743,6 @@ MinBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ============================================================
--- 日志按钮 + 面板
--- ============================================================
 local LogBtn = Instance.new("TextButton")
 LogBtn.Size = UDim2.new(0,30,0,20)
 LogBtn.Position = UDim2.new(1,-88,0,3)
@@ -829,9 +896,6 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
--- 通用功能按钮 + 面板
--- ============================================================
 local GenBtn = Instance.new("TextButton")
 GenBtn.Size = UDim2.new(0,52,0,20)
 GenBtn.Position = UDim2.new(1,-144,0,3)
@@ -1050,12 +1114,6 @@ GenClose.MouseButton1Click:Connect(function()
     GenFrame.Visible = false
 end)
 
--- ============================================================
--- 平滑 CFrame 移动模块（原始版 + 自动重绑）
--- 速度 < 65 正常走路；速度 >= 65 WalkSpeed 归零，全靠 CFrame 插值
--- 含网络抖动 + 帧率补偿，无方向抖动
--- 每帧检查绑定，Humanoid 被替换过会自动绑到新的碰撞箱
--- ============================================================
 local SmoothMove = {}
 
 local SM = {
@@ -1068,6 +1126,9 @@ local SM = {
     originalWalkSpeed = 16,
     walkAnimTrack = nil,
     animatorRef = nil,
+    cachedWalkAnim = nil,
+    lastBindCheck = 0,
+    lastDir = nil,
 }
 
 local WALK_THRESHOLD = 65
@@ -1084,6 +1145,7 @@ local NETWORK_LAG_MAX = 0.7
 local TARGET_FRAME_TIME = 1 / 60
 local FRAME_COMP_MIN = 0.6
 local FRAME_COMP_MAX = 1.4
+local BIND_CHECK_INTERVAL = 0.2
 
 local function isGrounded()
     if not SM.humanoid then return false end
@@ -1111,12 +1173,18 @@ local function isSensitive()
 end
 
 local function findWalkAnimation(char)
+    if SM.cachedWalkAnim and SM.cachedWalkAnim.Parent then
+        return SM.cachedWalkAnim
+    end
     local animate = char:FindFirstChild("Animate")
     if not animate then return nil end
     local walk = animate:FindFirstChild("walk")
     if walk then
         local walkAnim = walk:FindFirstChild("WalkAnim")
-        if walkAnim then return walkAnim end
+        if walkAnim then
+            SM.cachedWalkAnim = walkAnim
+            return walkAnim
+        end
     end
     return nil
 end
@@ -1209,6 +1277,7 @@ local function smoothMove(dt)
     if mv.Magnitude <= 0.01 then
         stopWalkAnimation()
         SM.shadowPos = nil
+        SM.lastDir = nil
         return
     end
 
@@ -1250,10 +1319,19 @@ local function smoothMove(dt)
     SM.shadowPos = SM.shadowPos:Lerp(targetPos, LERP_FACTOR + (1 - LERP_FACTOR) * SMOOTH_FACTOR)
 
     local finalPos = SM.shadowPos
-    local flat = Vector3.new(dir.X, 0, dir.Z)
-    local look = flat.Magnitude > 0.01
-        and CFrame.lookAt(Vector3.new(), flat)
-        or root.CFrame.Rotation
+
+    local look
+    if SM.lastDir and SM.lastDir:Dot(dir) > 0.9999 then
+        look = root.CFrame.Rotation
+    else
+        local flat = Vector3.new(dir.X, 0, dir.Z)
+        if flat.Magnitude > 0.01 then
+            look = CFrame.lookAt(Vector3.new(), flat)
+        else
+            look = root.CFrame.Rotation
+        end
+        SM.lastDir = dir
+    end
 
     pcall(function()
         root.CFrame = CFrame.new(finalPos) * look
@@ -1262,8 +1340,11 @@ local function smoothMove(dt)
     end)
 end
 
--- 每帧检查，如果 Humanoid / RootPart 换了（比如被 Humanoid 替换绕过换过），就自动重绑
 local function ensureBind()
+    local now = os.clock()
+    if now - SM.lastBindCheck < BIND_CHECK_INTERVAL then return true end
+    SM.lastBindCheck = now
+
     local char = localPlayer.Character
     if not char then return false end
 
@@ -1282,6 +1363,7 @@ local function ensureBind()
         SM.walkSpeedZeroed = false
         SM.walkAnimTrack = nil
         SM.animatorRef = nil
+        SM.cachedWalkAnim = nil
         SM.shadowPos = nil
         SM.originalWalkSpeed = hum.WalkSpeed
 
@@ -1302,6 +1384,7 @@ localPlayer.CharacterRemoving:Connect(function()
     stopWalkAnimation()
     SM.walkSpeedZeroed = false
     SM.shadowPos = nil
+    SM.cachedWalkAnim = nil
 end)
 
 RunService.RenderStepped:Connect(function(dt)
@@ -1347,9 +1430,10 @@ function SmoothMove.rebind(hum, char)
     SM.root = char and char:FindFirstChild("HumanoidRootPart") or nil
     SM.shadowPos = nil
     SM.walkSpeedZeroed = false
+    SM.cachedWalkAnim = nil
+    SM.lastBindCheck = 0
 end
 
--- 暴露给 Humanoid 替换脚本主动通知（可选）
 pcall(function()
     if not getgenv then return end
     getgenv().XDG_SpeedBound = function(hum, char)
@@ -1357,9 +1441,6 @@ pcall(function()
     end
 end)
 
--- ============================================================
--- 速度卡片
--- ============================================================
 local SpeedCard = AddFeature("绕过反作弊加速")
 SpeedCard.config.value = 80
 SpeedCard.config.default = 80
@@ -1371,9 +1452,6 @@ SpeedCard.onChange(function(v)
 end)
 SpeedCard.setVal(80)
 
--- ============================================================
--- REG 回调注册
--- ============================================================
 REG:OnInsert(function(n, u)
     Library:AddItem(n, function()
         if u and u ~= "" then
@@ -1434,9 +1512,6 @@ REG:OnInsertLog(function(d, s)
     end
 end)
 
--- ============================================================
--- 远程脚本拉取
--- ============================================================
 local SCRIPT_URLS = {
     "https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"
 }
