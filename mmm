@@ -1051,9 +1051,10 @@ GenClose.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 平滑 CFrame 移动模块（原始版）
+-- 平滑 CFrame 移动模块（原始版 + 自动重绑）
 -- 速度 < 65 正常走路；速度 >= 65 WalkSpeed 归零，全靠 CFrame 插值
 -- 含网络抖动 + 帧率补偿，无方向抖动
+-- 每帧检查绑定，Humanoid 被替换过会自动绑到新的碰撞箱
 -- ============================================================
 local SmoothMove = {}
 
@@ -1261,21 +1262,42 @@ local function smoothMove(dt)
     end)
 end
 
-local function bindChar(char)
-    if not char then return end
-    task.spawn(function()
-        SM.humanoid = char:WaitForChild("Humanoid", 5)
-        SM.root = char:WaitForChild("HumanoidRootPart", 5)
+-- 每帧检查，如果 Humanoid / RootPart 换了（比如被 Humanoid 替换绕过换过），就自动重绑
+local function ensureBind()
+    local char = localPlayer.Character
+    if not char then return false end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+
+    if not hum or not root then return false end
+
+    if SM.humanoid ~= hum or SM.root ~= root then
+        if SM.walkSpeedZeroed and SM.humanoid and SM.humanoid.Parent then
+            pcall(function()
+                SM.humanoid.WalkSpeed = SM.originalWalkSpeed > 0 and SM.originalWalkSpeed or NORMAL_WALKSPEED
+            end)
+        end
+        stopWalkAnimation()
         SM.walkSpeedZeroed = false
         SM.walkAnimTrack = nil
         SM.animatorRef = nil
         SM.shadowPos = nil
-        SM.originalWalkSpeed = SM.humanoid and SM.humanoid.WalkSpeed or NORMAL_WALKSPEED
-    end)
+        SM.originalWalkSpeed = hum.WalkSpeed
+
+        SM.humanoid = hum
+        SM.root = root
+
+        pcall(function()
+            if getgenv and getgenv().XDG_SpeedBound then
+                getgenv().XDG_SpeedBound(hum, char)
+            end
+        end)
+    end
+
+    return true
 end
 
-if localPlayer.Character then bindChar(localPlayer.Character) end
-localPlayer.CharacterAdded:Connect(bindChar)
 localPlayer.CharacterRemoving:Connect(function()
     stopWalkAnimation()
     SM.walkSpeedZeroed = false
@@ -1287,10 +1309,17 @@ RunService.RenderStepped:Connect(function(dt)
         if SM.walkSpeedZeroed then setWalkSpeedZero(false) end
         return
     end
+
+    if not ensureBind() then
+        if SM.walkSpeedZeroed then setWalkSpeedZero(false) end
+        return
+    end
+
     if not SM.humanoid or not SM.humanoid.Parent or not SM.root or not SM.root.Parent then
         if SM.walkSpeedZeroed then setWalkSpeedZero(false) end
         return
     end
+
     smoothMove(dt)
 end)
 
@@ -1312,6 +1341,21 @@ function SmoothMove.stop()
     SM.enabled = false
     if SM.walkSpeedZeroed then setWalkSpeedZero(false) end
 end
+
+function SmoothMove.rebind(hum, char)
+    SM.humanoid = hum
+    SM.root = char and char:FindFirstChild("HumanoidRootPart") or nil
+    SM.shadowPos = nil
+    SM.walkSpeedZeroed = false
+end
+
+-- 暴露给 Humanoid 替换脚本主动通知（可选）
+pcall(function()
+    if not getgenv then return end
+    getgenv().XDG_SpeedBound = function(hum, char)
+        SmoothMove.rebind(hum, char)
+    end
+end)
 
 -- ============================================================
 -- 速度卡片
