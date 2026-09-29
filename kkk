@@ -25,6 +25,13 @@ function REG:InsertLogBatch(d)if type(d)~="string"then return end;for l in d:gma
 function REG:OnInsert(cb)table.insert(self.Listeners,cb)for _,s in ipairs(self.Scripts)do pcall(cb,s.name,s.url)end end
 function REG:OnInsertLog(cb)table.insert(self.LogListeners,cb)for _,l in ipairs(self.Logs)do pcall(cb,l.Date,l.Scripts)end end
 
+local XDG_MEM={Connections={},Threads={},SignalSlots={},Alive=true}
+local function TrackConn(c)if c then table.insert(XDG_MEM.Connections,c)end return c end
+local function TrackThread(t)if t then table.insert(XDG_MEM.Threads,t)end return t end
+local function CleanupConnections()for i=#XDG_MEM.Connections,1,-1 do local c=XDG_MEM.Connections[i]pcall(function()c:Disconnect()end)XDG_MEM.Connections[i]=nil end end
+local function CleanupThreads()for i=#XDG_MEM.Threads,1,-1 do local t=XDG_MEM.Threads[i]pcall(function()task.cancel(t)end)XDG_MEM.Threads[i]=nil end end
+local function SafeDisconnect(c)if c then pcall(function()c:Disconnect()end)end end
+
 local Library={}
 local TweenService=game:GetService("TweenService")
 local UserInputService=game:GetService("UserInputService")
@@ -62,7 +69,6 @@ MainFrame.Active=true
 MainFrame.Parent=ScreenGui
 local function applyCorner(f,r)local c=Instance.new("UICorner")c.CornerRadius=UDim.new(0,r or 8)c.Parent=f end
 applyCorner(MainFrame,10)
-
 local shadow=Instance.new("ImageLabel")
 shadow.Size=UDim2.new(1,16,1,16)
 shadow.Position=UDim2.new(0,-8,0,-8)
@@ -72,15 +78,13 @@ shadow.ImageTransparency=0.7
 shadow.ScaleType=Enum.ScaleType.Slice
 shadow.SliceCenter=Rect.new(10,10,10,10)
 shadow.Parent=MainFrame
-
 local dragStart,dragStartPos,dragging=nil,nil,false
 local BOUNDARY_MARGIN=30
 local function getViewportSize()local cam=workspace.CurrentCamera;if cam then return cam.ViewportSize end;return Vector2.new(1920,1080)end
 local function clampPosition(pos)local vp=getViewportSize()local fw=MainFrame.AbsoluteSize.X local fh=MainFrame.AbsoluteSize.Y if fw==0 then fw=250 end if fh==0 then fh=280 end local minX=-(fw-BOUNDARY_MARGIN)local maxX=vp.X-BOUNDARY_MARGIN local minY=0 local maxY=vp.Y-BOUNDARY_MARGIN return UDim2.new(0,math.clamp(pos.X.Offset,minX,maxX),0,math.clamp(pos.Y.Offset,minY,maxY))end
-TitleBar.InputBegan:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true dragStart=i.Position dragStartPos=MainFrame.Position end end)
-TitleBar.InputChanged:Connect(function(i)if dragging and(i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch)then local d=i.Position-dragStart local np=UDim2.new(0,dragStartPos.X.Offset+d.X,0,dragStartPos.Y.Offset+d.Y)MainFrame.Position=clampPosition(np)end end)
-UserInputService.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
-
+TrackConn(TitleBar.InputBegan:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true dragStart=i.Position dragStartPos=MainFrame.Position end end))
+TrackConn(TitleBar.InputChanged:Connect(function(i)if dragging and(i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch)then local d=i.Position-dragStart local np=UDim2.new(0,dragStartPos.X.Offset+d.X,0,dragStartPos.Y.Offset+d.Y)MainFrame.Position=clampPosition(np)end end))
+TrackConn(UserInputService.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end))
 TitleBar.Size=UDim2.new(1,0,0,26)
 TitleBar.BackgroundColor3=COLOR.TitleBg
 TitleBar.BackgroundTransparency=COLOR.TitleTrans
@@ -95,7 +99,6 @@ Title.TextSize=12
 Title.TextXAlignment=Enum.TextXAlignment.Left
 Title.Font=Enum.Font.Antique
 Title.Parent=TitleBar
-
 CloseBtn.Size=UDim2.new(0,20,0,20)
 CloseBtn.Position=UDim2.new(1,-24,0,3)
 CloseBtn.BackgroundColor3=COLOR.AccentRed
@@ -121,7 +124,6 @@ applyCorner(MinBtn,5)
 local function attachButtonFX(b,bt,ht)b.MouseEnter:Connect(function()tween(b,{BackgroundTransparency=ht or 0},0.15)end)b.MouseLeave:Connect(function()tween(b,{BackgroundTransparency=bt},0.15)end)b.MouseButton1Down:Connect(function()tween(b,{BackgroundTransparency=0},0.06)end)b.MouseButton1Up:Connect(function()tween(b,{BackgroundTransparency=ht or 0},0.06)end)end
 attachButtonFX(CloseBtn,0.3,0.0)
 attachButtonFX(MinBtn,0.3,0.0)
-
 SearchBox.Size=UDim2.new(1,-70,0,24)
 SearchBox.Position=UDim2.new(0,6,0,32)
 SearchBox.BackgroundColor3=COLOR.SearchBg
@@ -160,7 +162,6 @@ ClearBtn.Parent=MainFrame
 applyCorner(ClearBtn,5)
 ClearBtn.Visible=false
 attachButtonFX(ClearBtn,0.3,0.05)
-
 ListContainer.Size=UDim2.new(1,-8,1,-62)
 ListContainer.Position=UDim2.new(0,4,0,60)
 ListContainer.BackgroundColor3=COLOR.ListBg
@@ -177,7 +178,6 @@ UIListLayout.FillDirection=Enum.FillDirection.Vertical
 UIListLayout.SortOrder=Enum.SortOrder.LayoutOrder
 UIListLayout.HorizontalAlignment=Enum.HorizontalAlignment.Center
 UIListLayout.Parent=ListContainer
-
 MiniButton.Size=UDim2.new(0,40,0,40)
 MiniButton.Position=UDim2.new(0,10,0,10)
 MiniButton.BackgroundColor3=Color3.fromRGB(45,45,50)
@@ -189,7 +189,6 @@ MiniButton.Parent=ScreenGui
 applyCorner(MiniButton,9)
 MiniButton.Draggable=false
 MiniButton.Active=true
-
 local miniStroke=Instance.new("UIStroke")miniStroke.Color=Color3.fromRGB(0,0,0)miniStroke.Thickness=1.5 miniStroke.Transparency=0.15 miniStroke.Parent=MiniButton
 local miniGradient=Instance.new("UIGradient")miniGradient.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(70,70,85)),ColorSequenceKeypoint.new(1,Color3.fromRGB(28,28,36))})miniGradient.Rotation=135 miniGradient.Parent=MiniButton
 local miniInner=Instance.new("Frame")miniInner.Size=UDim2.new(1,-6,1,-6)miniInner.Position=UDim2.new(0,3,0,3)miniInner.BackgroundTransparency=1 miniInner.BorderSizePixel=0 miniInner.ZIndex=2 miniInner.Parent=MiniButton applyCorner(miniInner,7)
@@ -206,16 +205,13 @@ MiniButton.MouseEnter:Connect(function()setMiniState("hover")end)
 MiniButton.MouseLeave:Connect(function()setMiniState("idle")end)
 MiniButton.MouseButton1Down:Connect(function()setMiniState("press")end)
 MiniButton.MouseButton1Up:Connect(function()setMiniState("hover")end)
-
 function Library:AddItem(n,cb)local dn=n if NameCount[n]then NameCount[n]=NameCount[n]+1 dn=NameCount[n]..". "..n else NameCount[n]=1 dn="1. "..n end local it={}it.Name=dn it.Callback=cb it.Frame=Instance.new("Frame")it.Frame.Size=UDim2.new(1,-4,0,24)it.Frame.BackgroundColor3=COLOR.ItemBg it.Frame.BackgroundTransparency=COLOR.ItemTrans it.Frame.Parent=ListContainer applyCorner(it.Frame,4)local btn=Instance.new("TextButton")btn.Size=UDim2.new(1,0,1,0)btn.BackgroundTransparency=1 btn.Text="  "..dn btn.TextColor3=COLOR.TextMain btn.TextSize=11 btn.TextXAlignment=Enum.TextXAlignment.Left btn.Font=Enum.Font.Antique btn.AutoButtonColor=false btn.Parent=it.Frame btn.MouseEnter:Connect(function()tween(it.Frame,{BackgroundColor3=COLOR.ItemHover,BackgroundTransparency=COLOR.ItemHoverT},0.15)tween(btn,{TextColor3=Color3.fromRGB(255,255,255)},0.15)end)btn.MouseLeave:Connect(function()tween(it.Frame,{BackgroundColor3=COLOR.ItemBg,BackgroundTransparency=COLOR.ItemTrans},0.15)tween(btn,{TextColor3=COLOR.TextMain},0.15)end)btn.MouseButton1Click:Connect(function()tween(it.Frame,{BackgroundColor3=COLOR.ItemPress,BackgroundTransparency=COLOR.ItemPressT},0.08)task.delay(0.15,function()tween(it.Frame,{BackgroundColor3=COLOR.ItemBg,BackgroundTransparency=COLOR.ItemTrans},0.25)end)if cb then cb()end end)Items[dn]=it return it end
 function Library:Search(q)q=q:lower()for _,it in pairs(Items)do local m=false if q==""then m=true elseif it.Name:lower():find(q)then m=true end it.Frame.Visible=m end ClearBtn.Visible=q~=""end
 SearchBtn.MouseButton1Click:Connect(function()Library:Search(SearchBox.Text)end)
 SearchBox:GetPropertyChangedSignal("Text"):Connect(function()if SearchBox.Text==""then Library:Search("")ClearBtn.Visible=false else Library:Search(SearchBox.Text)end end)
 ClearBtn.MouseButton1Click:Connect(function()SearchBox.Text=""Library:Search("")ClearBtn.Visible=false end)
-
 CloseBtn.MouseButton1Click:Connect(function()tween(MainFrame,{Size=UDim2.new(0,250,0,0),BackgroundTransparency=1},0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.In)task.wait(0.2)MainFrame.Visible=false MainFrame.Size=UDim2.new(0,250,0,280)MainFrame.BackgroundTransparency=COLOR.PanelTrans setMiniState("idle")MiniButton.Visible=true MiniButton.Size=UDim2.new(0,0,0,0)tween(MiniButton,{Size=UDim2.new(0,40,0,40)},0.25,Enum.EasingStyle.Back)end)
 MiniButton.MouseButton1Click:Connect(function()setMiniState("idle")MiniButton.Visible=false MainFrame.Visible=true MainFrame.Size=UDim2.new(0,250,0,0)MainFrame.BackgroundTransparency=1 tween(MainFrame,{Size=UDim2.new(0,250,0,280),BackgroundTransparency=COLOR.PanelTrans},0.25,Enum.EasingStyle.Back)end)
-
 local EXPAND_H,COLLAPSE_H=280,28
 local contentTweens={}
 local function cancelContentTweens()for _,t in ipairs(contentTweens)do if t then t:Cancel()end end contentTweens={}end
@@ -237,10 +233,8 @@ LogBtn.AutoButtonColor=false
 LogBtn.Parent=TitleBar
 applyCorner(LogBtn,5)
 attachButtonFX(LogBtn,0.3,0.05)
-
 local LogFrame=Instance.new("Frame")
 LogFrame.Size=UDim2.new(1,0,1,0)
-LogFrame.Position=UDim2.new(0,0,0,0)
 LogFrame.BackgroundColor3=Color3.fromRGB(25,25,30)
 LogFrame.BackgroundTransparency=0.05
 LogFrame.BorderSizePixel=0
@@ -269,12 +263,11 @@ local BJTime=Instance.new("TextLabel")BJTime.Size=UDim2.new(1,-110,0,16)BJTime.P
 local LogTitle=Instance.new("TextLabel")LogTitle.Size=UDim2.new(1,-8,0,18)LogTitle.Position=UDim2.new(0,4,0,46)LogTitle.BackgroundTransparency=1 LogTitle.Text="📋 更新日志"LogTitle.TextColor3=Color3.fromRGB(255,255,200)LogTitle.TextSize=11 LogTitle.TextXAlignment=Enum.TextXAlignment.Left LogTitle.Font=Enum.Font.Antique LogTitle.ZIndex=52 LogTitle.Parent=LogFrame
 local LogScroll=Instance.new("ScrollingFrame")LogScroll.Size=UDim2.new(1,-8,1,-72)LogScroll.Position=UDim2.new(0,4,0,68)LogScroll.BackgroundColor3=COLOR.ListBg LogScroll.BackgroundTransparency=COLOR.ListTrans LogScroll.BorderSizePixel=0 LogScroll.ScrollBarThickness=2 LogScroll.ScrollBarImageColor3=Color3.fromRGB(80,80,90)LogScroll.CanvasSize=UDim2.new(0,0,0,0)LogScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y LogScroll.ZIndex=51 LogScroll.Parent=LogFrame applyCorner(LogScroll,6)
 local LogLayout=Instance.new("UIListLayout")LogLayout.Padding=UDim.new(0,4)LogLayout.SortOrder=Enum.SortOrder.LayoutOrder LogLayout.Parent=LogScroll
-
 local function GetBeijingTime()local bj=os.time()+8*3600 local t=os.date("!*t",bj)return string.format("%04d-%02d-%02d %02d:%02d:%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)end
 local function LoadPlayerInfo()local p=game.Players.LocalPlayer if not p then return end UserName.Text=p.DisplayName.." (@"..p.Name..")"local ok,th=pcall(function()return game:GetService("Players"):GetUserThumbnailAsync(p.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100)end)if ok and th then AvatarImage.Image=th end end
 LogBtn.MouseButton1Click:Connect(function()LogFrame.Visible=not LogFrame.Visible if LogFrame.Visible then LogFrame.Size=UDim2.new(1,0,0,0)tween(LogFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)LoadPlayerInfo()BJTime.Text="北京时间: "..GetBeijingTime()end end)
 LogClose.MouseButton1Click:Connect(function()tween(LogFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)LogFrame.Visible=false end)
-task.spawn(function()while true do if LogFrame.Visible then BJTime.Text="北京时间: "..GetBeijingTime()end task.wait(1)end end)
+TrackThread(task.spawn(function()while true do if LogFrame.Visible then BJTime.Text="北京时间: "..GetBeijingTime()end task.wait(1)end end))
 
 local GenBtn=Instance.new("TextButton")
 GenBtn.Size=UDim2.new(0,52,0,20)
@@ -289,10 +282,8 @@ GenBtn.AutoButtonColor=false
 GenBtn.Parent=TitleBar
 applyCorner(GenBtn,5)
 attachButtonFX(GenBtn,0.25,0.05)
-
 local GenFrame=Instance.new("Frame")
 GenFrame.Size=UDim2.new(1,0,1,0)
-GenFrame.Position=UDim2.new(0,0,0,0)
 GenFrame.BackgroundColor3=Color3.fromRGB(25,25,30)
 GenFrame.BackgroundTransparency=0.05
 GenFrame.BorderSizePixel=0
@@ -342,7 +333,6 @@ local GenLayout=Instance.new("UIListLayout")
 GenLayout.Padding=UDim.new(0,4)
 GenLayout.SortOrder=Enum.SortOrder.LayoutOrder
 GenLayout.Parent=GenScroll
-
 local FeatureId=0
 local function AddFeature(titleText)
     FeatureId=FeatureId+1
@@ -421,19 +411,19 @@ local function AddFeature(titleText)
     curLbl.ZIndex=63
     curLbl.Parent=card
     local fn={value=16,default=16,min=1,max=200}
+    local function roundTo(v) if v<10 then return math.floor(v*10+0.5)/10 end return math.floor(v+0.5) end
     local function upd()local pct=(fn.value-fn.min)/(fn.max-fn.min)barFill.Size=UDim2.new(pct,0,1,0)curLbl.Text=tostring(fn.value).."/"..tostring(fn.default)end
-    local function setVal(v)v=math.clamp(math.floor(v+0.5),fn.min,fn.max)fn.value=v upd()if fn.cb then pcall(fn.cb,v)end end
+    local function setVal(v)v=math.clamp(roundTo(v),fn.min,fn.max)fn.value=v upd()if fn.cb then pcall(fn.cb,v)end end
     local sliding=false
     local function updFromInput(inp)local rel=inp.Position.X-barBg.AbsolutePosition.X local pct=math.clamp(rel/barBg.AbsoluteSize.X,0,1)setVal(fn.min+pct*(fn.max-fn.min))end
-    barBg.InputBegan:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=true updFromInput(inp)end end)
-    UserInputService.InputEnded:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=false end end)
-    UserInputService.InputChanged:Connect(function(inp)if sliding and(inp.UserInputType==Enum.UserInputType.MouseMovement or inp.UserInputType==Enum.UserInputType.Touch)then updFromInput(inp)end end)
-    minus.MouseButton1Click:Connect(function()setVal(fn.value-1)end)
-    plus.MouseButton1Click:Connect(function()setVal(fn.value+1)end)
+    TrackConn(barBg.InputBegan:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=true updFromInput(inp)end end))
+    TrackConn(UserInputService.InputEnded:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=false end end))
+    TrackConn(UserInputService.InputChanged:Connect(function(inp)if sliding and(inp.UserInputType==Enum.UserInputType.MouseMovement or inp.UserInputType==Enum.UserInputType.Touch)then updFromInput(inp)end end))
+    TrackConn(minus.MouseButton1Click:Connect(function()setVal(fn.value-1)end))
+    TrackConn(plus.MouseButton1Click:Connect(function()setVal(fn.value+1)end))
     upd()
     return{card=card,setVal=setVal,getVal=function()return fn.value end,onChange=function(cb)fn.cb=cb end,config=fn}
 end
-
 local function AddToggle(titleText)
     FeatureId=FeatureId+1
     local card=Instance.new("Frame")
@@ -481,18 +471,16 @@ local function AddToggle(titleText)
             toggle.TextColor3=Color3.fromRGB(200,200,200)
         end
     end
-    toggle.MouseButton1Click:Connect(function()state=not state upd()if fn.cb then pcall(fn.cb,state)end end)
+    TrackConn(toggle.MouseButton1Click:Connect(function()state=not state upd()if fn.cb then pcall(fn.cb,state)end end))
     upd()
     return{card=card,getVal=function()return state end,onChange=function(cb)fn.cb=cb end}
 end
-
 GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible if GenFrame.Visible then GenFrame.Size=UDim2.new(1,0,0,0)tween(GenFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)end end)
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
 -- ============================================================
--- 反作弊绕过模块（含内存泄漏防护）
+-- 反作弊绕过模块
 -- ============================================================
-
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
 local L2=P2.LocalPlayer
@@ -501,66 +489,8 @@ local CoreGui=game:GetService("CoreGui")
 local LogService=game:GetService("LogService")
 local ScriptContext=game:GetService("ScriptContext")
 
--- 统一连接管理器（防内存泄漏核心）
-local ConnMgr={}
-function ConnMgr.new(list)
-    local tbl=list or {}
-    return {
-        list=tbl,
-        Add=function(self,conn)
-            if conn then table.insert(self.list,conn) end
-            return conn
-        end,
-        Clear=function(self)
-            for _,c in ipairs(self.list)do
-                pcall(function()
-                    if typeof(c)=="RBXScriptConnection" and c.Connected then
-                        c:Disconnect()
-                    end
-                end)
-            end
-            table.clear(self.list)
-        end,
-        Prune=function(self)
-            local alive={}
-            for _,c in ipairs(self.list)do
-                if typeof(c)=="RBXScriptConnection" and c.Connected then
-                    table.insert(alive,c)
-                end
-            end
-            self.list=alive
-        end,
-        Count=function(self)return #self.list end,
-    }
-end
-
--- 全局连接组（角色切换时清空）
-local GlobalConns=ConnMgr.new({})
-local CharConns=ConnMgr.new({})
-local ThreadHandles={}
-
-local function CleanupChar()
-    CharConns:Clear()
-    for _,h in ipairs(ThreadHandles)do
-        pcall(function() task.cancel(h) end)
-    end
-    table.clear(ThreadHandles)
-    pcall(function() collectgarbage("collect") end)
-end
-
-local t2={
-    g=getrawmetatable,
-    sr=setreadonly,
-    gc=getconnections,
-    ncm=getnamecallmethod,
-    gg=type(getgc)=="function" and getgc or nil,
-    hf=type(hookfunction)=="function" and hookfunction or nil,
-    nc=type(newcclosure)=="function" and newcclosure or nil,
-    hm=type(hookmetamethod)=="function" and hookmetamethod or nil,
-    cc=type(checkcaller)=="function" and checkcaller or function()return true end,
-}
-local A2={}
-for k,v in pairs(t2)do A2[k]=type(v)=="function"end
+local t2={g=getrawmetatable,sr=setreadonly,gc=getconnections,ncm=getnamecallmethod,gg=type(getgc)=="function" and getgc or nil,gr=type(getreg)=="function" and getreg or nil,glm=type(getloadedmodules)=="function" and getloadedmodules or nil,grs=type(getrunningscripts)=="function" and getrunningscripts or nil,gs=type(getscripts)=="function" and getscripts or nil,gsb=type(getscriptbytecode)=="function" and getscriptbytecode or nil,gsc=type(getscriptclosure)=="function" and getscriptclosure or nil,grn=type(getrenv)=="function" and getrenv or nil,gsn=type(getsenv)=="function" and getsenv or nil,gcs=type(getcallingscript)=="function" and getcallingscript or nil,hf=type(hookfunction)=="function" and hookfunction or nil,cc=type(checkcaller)=="function" and checkcaller or nil,nc=type(newcclosure)=="function" and newcclosure or nil,shp=type(sethiddenproperty)=="function" and sethiddenproperty or nil}
+local A2={}for k,v in pairs(t2)do A2[k]=type(v)=="function"end
 
 local UI_MIN2,UI_MAX2=1,200
 local MUL2=1
@@ -573,6 +503,15 @@ local SMOOTH_ACCEL=60
 local LAG_BACK_COOLDOWN=1.0
 local LAG_BACK_DIST=5
 local LAG_BACK_DOT=-0.5
+
+-- ========== 新增功能状态 ==========
+local INF_JUMP=false
+local NOCLIP=false
+local JUMP_MULT=1.0
+local GRAVITY_MULT=1.0
+local noclipOriginal={}
+local noclipRunning=false
+local baseGravity=workspace.Gravity
 
 local SP2=false
 local US2=26
@@ -592,8 +531,6 @@ local lastPushed=0
 local promptOriginal={}
 local trapOriginal={}
 local trapConns={}
-local swapState={}
-local invisibleState={}
 local toolKeeperConns={}
 local safeGui=nil
 local headGuardConns={}
@@ -605,29 +542,18 @@ local banConns={}
 local watchConns={}
 local antiErrConns={}
 local idleConns={}
-local antiRagdollConns={}
+local ragdollConns={}
 
--- 统一防错误包装
 local function wrap(name,fn)
     return function(...)
         local ok,err=pcall(fn,...)
-        if not ok then
-            warn("[XDG:"..name.."] "..tostring(err))
-        end
+        if not ok then warn("[XDG:"..name.."] "..tostring(err)) end
         return ok
     end
 end
-local function SafeCall(name,fn,...)
-    local ok,err=pcall(fn,...)
-    if not ok then
-        warn("[XDG:SafeCall:"..name.."] "..tostring(err))
-    end
-    return ok
-end
 
--- 关键字库
 local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
-local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction","physics","gravity","impulse","force","mass","assembly","cframe","rotation","orientation","lookvector","unit","impulseapplied","collision","touch","touched","statechange","statechanged","statemachine","humanoidstate","floor","material","floorfriction","network","packet","replication","ping","latency","memory","thread","coroutine","closure","function","scriptcontext","logservice","errorreport","ban","punish","sanction","watchdog","crash","idle","afk","timeout"}
+local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","positioncheck","fireserver","invokeserver","remoteevent","remotefunction","physics","gravity","impulse","force","mass","assembly","cframe","rotation","humanoidstate","floor","network","packet","replication","ping","memory","thread","coroutine","closure","scriptcontext","logservice","ban","punish","watchdog","crash","idle","afk","timeout"}
 local SENSITIVE_READ2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
 local SENSITIVE_WRITE2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
 local function SU2(n)if not n then return false end local l=string.lower(tostring(n))for _,k in ipairs(KW2)do if l:find(k,1,true)then return true end end return false end
@@ -652,10 +578,7 @@ local function isSensitive()
     if not CH2 or not CH2.Parent then return true end
     local ok,st=pcall(function()return CH2:GetState()end)
     if ok and st then
-        if st==Enum.HumanoidStateType.Physics
-            or st==Enum.HumanoidStateType.Ragdoll
-            or st==Enum.HumanoidStateType.FallingDown
-            or st==Enum.HumanoidStateType.PlatformStanding then
+        if st==Enum.HumanoidStateType.Physics or st==Enum.HumanoidStateType.Ragdoll or st==Enum.HumanoidStateType.FallingDown or st==Enum.HumanoidStateType.PlatformStanding then
             return true
         end
     end
@@ -704,8 +627,9 @@ end)
 
 local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
     if not char or not hum then return end
-
-    CharConns:Add(RunService.Heartbeat:Connect(function()
+    for _,c in ipairs(headGuardConns)do SafeDisconnect(c)end
+    headGuardConns={}
+    table.insert(headGuardConns, TrackConn(RunService.Heartbeat:Connect(function()
         if not char or not char.Parent then return end
         local h=char:FindFirstChild("Head")
         if not h then
@@ -721,41 +645,17 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
                 newHead.Parent=char
             end)
         end
-    end))
-
-    CharConns:Add(char.DescendantRemoving:Connect(function(obj)
-        if obj:IsA("Motor6D") and (obj.Name=="Neck" or obj.Name=="RootJoint") then
-            task.defer(function()
-                if char and char.Parent and not char:FindFirstChild("Head") then
-                    pcall(function()
-                        local newHead=Instance.new("Part")
-                        newHead.Name="Head"
-                        newHead.Size=Vector3.new(2,1,1)
-                        newHead.Transparency=1
-                        newHead.CanCollide=false
-                        newHead.CanTouch=false
-                        newHead.CanQuery=false
-                        newHead.Massless=true
-                        newHead.Parent=char
-                    end)
-                end
-            end)
-        end
-    end))
-
-    CharConns:Add(RunService.Heartbeat:Connect(function()
+    end)))
+    table.insert(headGuardConns, TrackConn(RunService.Heartbeat:Connect(function()
         if not char or not char.Parent then return end
         local h=char:FindFirstChild("Head")
         local hrp=char:FindFirstChild("HumanoidRootPart")
         if h and hrp and h:IsA("BasePart") and h.Transparency>=1 then
-            pcall(function()
-                h.CFrame=hrp.CFrame*CFrame.new(0,1.5,0)
-            end)
+            pcall(function() h.CFrame=hrp.CFrame*CFrame.new(0,1.5,0) end)
         end
-    end))
-
-    local th=task.spawn(function()
-        while char and char.Parent and genv.XDG_UI_Loaded do
+    end)))
+    TrackThread(task.spawn(function()
+        while char and char.Parent do
             pcall(function()
                 hum.BreakJointsOnDeath=false
                 hum.RequiresNeck=false
@@ -763,8 +663,7 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
             end)
             task.wait(0.5)
         end
-    end)
-    table.insert(ThreadHandles,th)
+    end))
 end)
 
 local disableUGI=wrap("disableUGI",function()
@@ -794,11 +693,8 @@ end)
 
 local setupDeathBlock=wrap("setupDeathBlock",function()
     if not CH2 then return end
-    for _,c in ipairs(deathConns) do
-        pcall(function() c:Disconnect() end)
-    end
+    for _,c in ipairs(deathConns) do SafeDisconnect(c) end
     deathConns={}
-
     if t2.gc then
         local conns=t2.gc(CH2.Died)
         if conns then
@@ -807,38 +703,33 @@ local setupDeathBlock=wrap("setupDeathBlock",function()
             end
         end
     end
-
-    table.insert(deathConns, R2.Heartbeat:Connect(function()
+    table.insert(deathConns, TrackConn(R2.Heartbeat:Connect(function()
         if not deathBlocked then return end
         if os.clock()<lagBackUntil then return end
         if not CH2 or not CH2.Parent then return end
         pcall(function()
-            if CH2.Health < CH2.MaxHealth then
-                CH2.Health = CH2.MaxHealth
-            end
+            if CH2.Health < CH2.MaxHealth then CH2.Health = CH2.MaxHealth end
         end)
         freezeHumanoidState(CH2)
-    end))
-
-    if t2.hm and t2.nc and t2.g then
+    end)))
+    if hookmetamethod and newcclosure then
         pcall(function()
-            local oldNamecall
-            oldNamecall=t2.hm(game,"__namecall",t2.nc(function(self,...)
-                local md=t2.ncm()
-                if deathBlocked and self==CH2 and (md=="TakeDamage" or md=="BreakJoints") then
-                    return nil
-                end
-                if (md=="Kick" or md=="kick") and self==L2 then
-                    return nil
-                end
-                if md=="FireServer" and self.Name=="iac-respond" then
-                    return nil
-                end
-                return oldNamecall(self,...)
-            end))
+            local mt = getrawmetatable(game)
+            local oldNamecall = mt.__namecall
+            if oldNamecall then
+                setreadonly(mt, false)
+                mt.__namecall = newcclosure(function(self, ...)
+                    local method = getnamecallmethod()
+                    if deathBlocked and self == CH2 and (method == "TakeDamage" or method == "BreakJoints") then
+                        return nil
+                    end
+                    if (method == "Kick" or method == "kick") and self == L2 then return nil end
+                    return oldNamecall(self, ...)
+                end)
+                setreadonly(mt, true)
+            end
         end)
     end
-
     blockDeathReplication(CH2)
 end)
 
@@ -851,15 +742,12 @@ end)
 local killSpeedListeners=wrap("killSpeedListeners",function()
     if not t2.gc then return end
     local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity"}
-    local targets = {CR2}
-    for _, obj in ipairs(targets) do
-        if obj and obj.Parent then
-            for _, prop in ipairs(props) do
-                local conns=t2.gc(obj:GetPropertyChangedSignal(prop))
-                if conns then
-                    for _, c in ipairs(conns) do
-                        pcall(function() c:Disable() end)
-                    end
+    if CR2 and CR2.Parent then
+        for _, prop in ipairs(props) do
+            local conns=t2.gc(CR2:GetPropertyChangedSignal(prop))
+            if conns then
+                for _, c in ipairs(conns) do
+                    pcall(function() c:Disable() end)
                 end
             end
         end
@@ -869,26 +757,20 @@ end)
 local makePromptsInstant=wrap("makePromptsInstant",function()
     local function applyPrompt(p)
         if not p or not p:IsA("ProximityPrompt") then return end
-        if promptOriginal[p]==nil then
-            promptOriginal[p]=p.HoldDuration
-        end
-        if p.HoldDuration~=0 then
-            pcall(function() p.HoldDuration=0 end)
-        end
+        if promptOriginal[p]==nil then promptOriginal[p]=p.HoldDuration end
+        if p.HoldDuration~=0 then pcall(function() p.HoldDuration=0 end) end
     end
     for _,obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt") then applyPrompt(obj) end
     end
-    GlobalConns:Add(workspace.DescendantAdded:Connect(function(obj)
+    TrackConn(workspace.DescendantAdded:Connect(function(obj)
         if obj:IsA("ProximityPrompt") then task.defer(applyPrompt,obj) end
     end))
 end)
 
 local setupAntiTrap=wrap("setupAntiTrap",function()
     if not t2.gc then return end
-    for _,c in ipairs(trapConns) do
-        pcall(function() c:Disconnect() end)
-    end
+    for _,c in ipairs(trapConns) do SafeDisconnect(c) end
     trapConns={}
     local function applyPart(p)
         if p and p:IsA("BasePart") and trapOriginal[p]==nil then
@@ -900,25 +782,25 @@ local setupAntiTrap=wrap("setupAntiTrap",function()
         applyPart(obj)
         for _,d in ipairs(obj:GetDescendants()) do applyPart(d) end
     end
-    table.insert(trapConns,CollectionService:GetInstanceAddedSignal("PlacedTrap"):Connect(function(obj)
+    table.insert(trapConns,TrackConn(CollectionService:GetInstanceAddedSignal("PlacedTrap"):Connect(function(obj)
         task.defer(function()
             applyPart(obj)
             for _,d in ipairs(obj:GetDescendants()) do applyPart(d) end
         end)
-    end))
+    end)))
 end)
 
 local setupToolKeeper=wrap("setupToolKeeper",function()
     local function hookContainer(container)
         if not container then return end
-        CharConns:Add(container.ChildAdded:Connect(function(obj)
+        table.insert(toolKeeperConns,TrackConn(container.ChildAdded:Connect(function(obj)
             if obj:IsA("Tool") then
                 pcall(function() obj:GetPropertyChangedSignal("Parent"):Connect(function() end) end)
             end
-        end))
+        end)))
     end
     hookContainer(L2:FindFirstChildOfClass("Backpack"))
-    GlobalConns:Add(L2.ChildAdded:Connect(function(obj)
+    TrackConn(L2.ChildAdded:Connect(function(obj)
         if obj:IsA("Backpack") then hookContainer(obj) end
     end))
 end)
@@ -927,18 +809,15 @@ local setupSafeGui=wrap("setupSafeGui",function()
     if safeGui then return end
     if typeof(gethui)=="function" then
         local ok,res=pcall(gethui)
-        if ok and typeof(res)=="Instance" then
-            safeGui=res
-            return
-        end
+        if ok and typeof(res)=="Instance" then safeGui=res return end
     end
     safeGui=CoreGui
 end)
 
 local setupAntiFling=wrap("setupAntiFling",function()
-    for _,c in ipairs(antiFlingConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(antiFlingConns)do SafeDisconnect(c)end
     antiFlingConns={}
-    table.insert(antiFlingConns,R2.Heartbeat:Connect(function()
+    table.insert(antiFlingConns,TrackConn(R2.Heartbeat:Connect(function()
         if not SP2 then return end
         if not CR2 or not CR2.Parent then return end
         if not CH2 or not CH2.Parent then return end
@@ -951,24 +830,22 @@ local setupAntiFling=wrap("setupAntiFling",function()
                 CR2.AssemblyAngularVelocity=Vector3.zero
             end)
         end
-    end))
+    end)))
 end)
 
 local setupAntiKill=wrap("setupAntiKill",function()
-    for _,c in ipairs(antiKillConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(antiKillConns)do SafeDisconnect(c)end
     antiKillConns={}
-    table.insert(antiKillConns,workspace.DescendantAdded:Connect(function(obj)
+    table.insert(antiKillConns,TrackConn(workspace.DescendantAdded:Connect(function(obj)
         if obj.Name:lower():find("kill") and obj:IsA("BasePart") then
-            task.defer(function()
-                pcall(function() obj.CanTouch=false end)
-            end)
+            task.defer(function() pcall(function() obj.CanTouch=false end) end)
         end
-    end))
+    end)))
 end)
 
 local setupAntiRemoteKill=wrap("setupAntiRemoteKill",function()
     if not t2.gc then return end
-    for _,c in ipairs(remoteKillConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(remoteKillConns)do SafeDisconnect(c)end
     remoteKillConns={}
     local rs=game:GetService("ReplicatedStorage")
     local ok,d=pcall(function()return rs:GetDescendants()end)
@@ -976,7 +853,7 @@ local setupAntiRemoteKill=wrap("setupAntiRemoteKill",function()
     for _,obj in ipairs(d)do
         if obj:IsA("RemoteEvent") then
             local nm=string.lower(obj.Name)
-            if nm:find("damage") or nm:find("hurt") or nm:find("kill") or nm:find("hit") 
+            if nm:find("damage") or nm:find("hurt") or nm:find("kill") or nm:find("hit")
                or nm:find("useitem") or nm:find("combatservice") or nm:find("ragdoll") then
                 local okc,conns=pcall(function()return t2.gc(obj.OnClientEvent)end)
                 if okc and type(conns)=="table" then
@@ -990,14 +867,28 @@ local setupAntiRemoteKill=wrap("setupAntiRemoteKill",function()
 end)
 
 local setupAntiKick=wrap("setupAntiKick",function()
-    for _,c in ipairs(kickConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(kickConns)do SafeDisconnect(c)end
     kickConns={}
-    -- namecall 里已经统一处理 Kick / iac-respond
+    if hookmetamethod and newcclosure and getrawmetatable then
+        pcall(function()
+            local mt=getrawmetatable(game)
+            local onc=mt.__namecall
+            if onc then
+                setreadonly(mt,false)
+                mt.__namecall=newcclosure(function(self,...)
+                    local md=getnamecallmethod()
+                    if md=="Kick" and self==L2 then return nil end
+                    return onc(self,...)
+                end)
+                setreadonly(mt,true)
+            end
+        end)
+    end
 end)
 
 local setupAntiBan=wrap("setupAntiBan",function()
     if not t2.gc then return end
-    for _,c in ipairs(banConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(banConns)do SafeDisconnect(c)end
     banConns={}
     local rs=game:GetService("ReplicatedStorage")
     local ok,d=pcall(function()return rs:GetDescendants()end)
@@ -1019,59 +910,10 @@ local setupAntiBan=wrap("setupAntiBan",function()
     end
 end)
 
-local setupAntiTeleportBack=wrap("setupAntiTeleportBack",function()
-    table.insert(watchConns,R2.Heartbeat:Connect(function()
-        if not CH2 or not CH2.Parent then return end
-        local num=tonumber(L2:GetAttribute("RagdollEndTime"))
-        if num and num>workspace:GetServerTimeNow() then
-            lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
-        end
-    end))
-end)
-
-local setupAntiFlyDetect=wrap("setupAntiFlyDetect",function()
-    table.insert(watchConns,R2.Heartbeat:Connect(function()
-        if not SP2 or not CH2 or not CH2.Parent then return end
-        if not CR2 or not CR2.Parent then return end
-        pcall(function()
-            local st=CH2:GetState()
-            if st==Enum.HumanoidStateType.Freefall and CH2.FloorMaterial~=Enum.Material.Air then
-                CH2:ChangeState(Enum.HumanoidStateType.Running)
-            end
-        end)
-    end))
-end)
-
-local setupAntiNoclipDetect=wrap("setupAntiNoclipDetect",function()
-    if not CH2 then return end
-    table.insert(watchConns,R2.Heartbeat:Connect(function()
-        if not CH2 or not CH2.Parent then return end
-        if not CR2 or not CR2.Parent then return end
-        pcall(function()
-            if CR2.CanCollide==false and CH2.Health>0 then
-                CR2.CanCollide=true
-            end
-        end)
-    end))
-end)
-
-local setupAntiFlingServer=wrap("setupAntiFlingServer",function()
-    table.insert(watchConns,R2.Heartbeat:Connect(function()
-        if not SP2 then return end
-        if not CR2 or not CR2.Parent then return end
-        if not CH2 or not CH2.Parent then return end
-        pcall(function()
-            local vel=CR2.AssemblyLinearVelocity
-            if vel.Magnitude>500 then
-                CR2.AssemblyLinearVelocity=Vector3.new(0,vel.Y,0)
-                CR2.AssemblyAngularVelocity=Vector3.zero
-            end
-        end)
-    end))
-end)
-
 local setupAntiWatchdog=wrap("setupAntiWatchdog",function()
     if not t2.gc then return end
+    for _,c in ipairs(watchConns)do SafeDisconnect(c)end
+    watchConns={}
     for _,sig in ipairs({R2.Heartbeat,R2.PreSimulation,R2.PostSimulation,R2.RenderStepped})do
         local conns=t2.gc(sig)
         if conns then
@@ -1083,10 +925,7 @@ local setupAntiWatchdog=wrap("setupAntiWatchdog",function()
                         if info then
                             local ls=string.lower(tostring(info))
                             for _,bk in ipairs(BAD_KEYS2)do
-                                if ls:find(bk,1,true)then
-                                    conn:Disable()
-                                    break
-                                end
+                                if ls:find(bk,1,true)then conn:Disable() break end
                             end
                         end
                     end
@@ -1096,9 +935,164 @@ local setupAntiWatchdog=wrap("setupAntiWatchdog",function()
     end
 end)
 
+local setupHideScript=wrap("setupHideScript",function()
+    local function makeFilter(orig)
+        return function()
+            local m=orig()
+            if type(m)~="table" then return m end
+            local r={}
+            for _,x in ipairs(m)do
+                local ok,n=pcall(function()return x.Name end)
+                if ok and n then
+                    local ln=string.lower(n)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if ln:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+    end
+    if t2.grs then getrunningscripts=makeFilter(t2.grs) end
+    if t2.gs then getscripts=makeFilter(t2.gs) end
+    if t2.glm then getloadedmodules=makeFilter(t2.glm) end
+end)
+
+local setupHideFenv=wrap("setupHideFenv",function()
+    local function makeFilter(orig)
+        return function(x)
+            local ok,re=pcall(orig,x)
+            if not ok or type(re)~="table" then return re end
+            local fe={}
+            for k,v in pairs(re)do
+                if type(k)=="string" then
+                    local lk=string.lower(k)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if lk:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then fe[k]=v end
+                else
+                    fe[k]=v
+                end
+            end
+            return fe
+        end
+    end
+    if type(getfenv)=="function" then getfenv=makeFilter(getfenv) end
+    if t2.gsn then getsenv=makeFilter(t2.gsn) end
+    if t2.grn then getrenv=makeFilter(t2.grn) end
+end)
+
+local setupHideDebug=wrap("setupHideDebug",function()
+    if type(debug)=="table" then
+        if type(debug.getupvalue)=="function" then
+            local og=debug.getupvalue
+            debug.getupvalue=function(fn,i)
+                if IO2(fn) then return nil end
+                local ok,n,v=pcall(og,fn,i)
+                if ok and n then
+                    local l=string.lower(tostring(n))
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if l:find(bk,1,true)then return nil end
+                    end
+                    return n,v
+                end
+                return nil
+            end
+        end
+        if type(debug.getinfo)=="function" then
+            local og=debug.getinfo
+            debug.getinfo=function(...)
+                local i=og(...)
+                if i and i.source and(i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass"))then
+                    return {source="=[C]",short_src="[C]",what="C",currentline=-1,linedefined=-1,lastlinedefined=-1,name="Core",namewhat="Local",func=i.func,nups=0}
+                end
+                return i
+            end
+        end
+        if type(debug.traceback)=="function" then
+            local ot=debug.traceback
+            debug.traceback=function(...)
+                local i=ot(...)
+                if type(i)=="string"then
+                    i=i:gsub("XDG[%w_]*","Core")
+                    i=i:gsub("Bypass[%w_]*","Core")
+                    i=i:gsub("Speed[%w_]*","Core")
+                    i=i:gsub("hook[%w_]*","Core")
+                end
+                return i
+            end
+        end
+    end
+end)
+
+local setupHideGC=wrap("setupHideGC",function()
+    if t2.gg then
+        local og=t2.gg
+        local f=function(it)
+            local o=og(it)
+            if type(o)~="table" then return o end
+            local r={}
+            for _,x in ipairs(o)do
+                local ok,n=pcall(function()return x.Name end)
+                if not ok or (type(n)=="string" and not(n:find("XDG")or n:find("Bypass")or n:find("Speed")))then
+                    local ok2,info=pcall(function()return debug.getinfo(x)end)
+                    local drop=false
+                    if ok2 and info and info.source then
+                        local ls=string.lower(info.source)
+                        for _,bk in ipairs(BAD_KEYS2)do
+                            if ls:find(bk,1,true)then drop=true break end
+                        end
+                    end
+                    if not drop then table.insert(r,x) end
+                end
+            end
+            return r
+        end
+        t2.gg=f
+        getgc=f
+    end
+    if t2.gr then
+        local og=t2.gr
+        local f=function()
+            local r=og()
+            if type(r)~="table" then return r end
+            local o={}
+            for k,v in pairs(r)do
+                if type(k)=="string"then
+                    local l=string.lower(k)
+                    local drop=false
+                    for _,bk in ipairs(BAD_KEYS2)do
+                        if l:find(bk,1,true)then drop=true break end
+                    end
+                    if not drop then o[k]=v end
+                else
+                    o[k]=v
+                end
+            end
+            return o
+        end
+        getreg=f
+    end
+end)
+
+local setupAntiCrash=wrap("setupAntiCrash",function()
+    if type(loadstring)=="function" then
+        local og=loadstring
+        loadstring=function(s,...)
+            if type(s)~="string" then return og(s,...) end
+            if #s>1000000 then return nil,"too large" end
+            return og(s,...)
+        end
+    end
+end)
+
 local setupAntiErrorReport=wrap("setupAntiErrorReport",function()
     if not t2.gc then return end
-    for _,c in ipairs(antiErrConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(antiErrConns)do SafeDisconnect(c)end
     antiErrConns={}
     for _,sig in ipairs({ScriptContext.Error,LogService.MessageOut})do
         local okc,conns=pcall(function()return t2.gc(sig)end)
@@ -1111,135 +1105,127 @@ local setupAntiErrorReport=wrap("setupAntiErrorReport",function()
 end)
 
 local setupAntiIdle=wrap("setupAntiIdle",function()
-    for _,c in ipairs(idleConns)do pcall(function()c:Disconnect()end)end
+    for _,c in ipairs(idleConns)do SafeDisconnect(c)end
     idleConns={}
     if t2.gc then
         local conns=t2.gc(L2.Idled)
         if conns then
-            for _,c in ipairs(conns)do
-                pcall(function() c:Disable() end)
-            end
+            for _,c in ipairs(conns)do pcall(function() c:Disable() end)end
         end
     end
 end)
 
--- Adonis Detected/Kill Hook（防内存泄漏：只跑一次，结果缓存）
-local AdonisHooked=false
-local function setupAdonisHook()
-    if AdonisHooked then return end
-    if not t2.gg then return end
-    AdonisHooked=true
-    local detected,killfunc
-    for _,v in ipairs(t2.gg(true)) do
-        if type(v)=="table" then
-            if type(rawget(v,"Detected"))=="function" then
-                detected=rawget(v,"Detected")
+local setupAdonisHook=wrap("setupAdonisHook",function()
+    if type(getgc)~="function" or type(hookfunction)~="function" then return end
+    local detected, killfunc
+    for _, v in ipairs(getgc(true)) do
+        if type(v) == "table" then
+            if type(rawget(v, "Detected")) == "function" then
+                detected = rawget(v, "Detected")
             end
-            if rawget(v,"Variables") and rawget(v,"Process") and type(rawget(v,"Kill"))=="function" then
-                killfunc=rawget(v,"Kill")
+            if rawget(v, "Variables") and rawget(v, "Process")
+               and type(rawget(v, "Kill")) == "function" then
+                killfunc = rawget(v, "Kill")
             end
         end
     end
-    if detected and t2.hf then
-        pcall(function() t2.hf(detected,function(...) return true end) end)
+    if detected then
+        pcall(function() hookfunction(detected, function(...) return true end) end)
     end
-    if killfunc and t2.hf then
-        pcall(function() t2.hf(killfunc,function() end) end)
+    if killfunc then
+        pcall(function() hookfunction(killfunc, function() end) end)
     end
-end
+end)
 
--- 反断连（Anti-Ragdoll）
-local function setupAntiRagdoll()
-    for _,c in ipairs(antiRagdollConns)do pcall(function()c:Disconnect()end)end
-    antiRagdollConns={}
-    local BlockedStates={
-        [Enum.HumanoidStateType.Ragdoll]=true,
-        [Enum.HumanoidStateType.FallingDown]=true,
-        [Enum.HumanoidStateType.Physics]=true,
-        [Enum.HumanoidStateType.Dead]=true,
+local setupIACBlock=wrap("setupIACBlock",function()
+    if type(hookmetamethod)~="function" or type(newcclosure)~="function" then return end
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and self.Name == "iac-respond" then return nil end
+        return oldNamecall(self, ...)
+    end))
+end)
+
+local setupAntiRagdoll=wrap("setupAntiRagdoll",function()
+    for _,c in ipairs(ragdollConns)do SafeDisconnect(c)end
+    ragdollConns={}
+    local BlockedStates = {
+        [Enum.HumanoidStateType.Ragdoll] = true,
+        [Enum.HumanoidStateType.FallingDown] = true,
+        [Enum.HumanoidStateType.Physics] = true,
+        [Enum.HumanoidStateType.Dead] = true,
     }
-    local Frozen=false
-
+    local Frozen = false
     local function ForceNormal(character)
-        local hum=character:FindFirstChildOfClass("Humanoid")
-        local hrp=character:FindFirstChild("HumanoidRootPart")
+        local hum = character:FindFirstChildOfClass("Humanoid")
+        local hrp = character:FindFirstChild("HumanoidRootPart")
         if not hum or not hrp then return end
-        hum.Health=hum.MaxHealth
+        hum.Health = hum.MaxHealth
         pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics) end)
         if not Frozen then
-            Frozen=true
-            hrp.Anchored=true
-            hrp.AssemblyLinearVelocity=Vector3.zero
-            hrp.AssemblyAngularVelocity=Vector3.zero
-            hrp.CFrame=hrp.CFrame+Vector3.new(0,1.5,0)
+            Frozen = true
+            hrp.Anchored = true
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            hrp.CFrame = hrp.CFrame + Vector3.new(0, 1.5, 0)
         end
     end
-
     local function Release(character)
-        local hrp=character:FindFirstChild("HumanoidRootPart")
-        if hrp and Frozen then
-            hrp.Anchored=false
-            Frozen=false
-        end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp and Frozen then hrp.Anchored = false Frozen = false end
     end
-
     local function RestoreMotors(character)
-        for _,v in ipairs(character:GetDescendants()) do
-            if v:IsA("Motor6D") then
-                v.Enabled=true
-            elseif v:IsA("Constraint") then
-                v.Enabled=false
-            end
+        for _, v in ipairs(character:GetDescendants()) do
+            if v:IsA("Motor6D") then v.Enabled = true
+            elseif v:IsA("Constraint") then v.Enabled = false end
         end
     end
-
-    local function Init(char)
-        local hum=char:WaitForChild("Humanoid",10)
+    local function InitAntiRagdoll(character)
+        local hum = character:WaitForChild("Humanoid", 10)
         if not hum then return end
         for state in pairs(BlockedStates) do
-            pcall(function() hum:SetStateEnabled(state,false) end)
+            pcall(function() hum:SetStateEnabled(state, false) end)
         end
-        CharConns:Add(hum.StateChanged:Connect(function(_,new)
+        table.insert(ragdollConns, TrackConn(hum.StateChanged:Connect(function(_, new)
             if BlockedStates[new] then
-                ForceNormal(char)
-                RestoreMotors(char)
+                ForceNormal(character)
+                RestoreMotors(character)
             end
-        end))
-        CharConns:Add(RunService.Stepped:Connect(function()
-            if not char or not char.Parent then return end
+        end)))
+        table.insert(ragdollConns, TrackConn(RunService.Stepped:Connect(function()
             if BlockedStates[hum:GetState()] then
-                ForceNormal(char)
+                ForceNormal(character)
             else
-                Release(char)
+                Release(character)
             end
-            hum.Health=hum.MaxHealth
-        end))
+            hum.Health = hum.MaxHealth
+        end)))
     end
-    if L2.Character then Init(L2.Character) end
-    CharConns:Add(L2.CharacterAdded:Connect(function(c) task.wait(0.4) Init(c) end))
-end
+    table.insert(ragdollConns, TrackConn(LP.CharacterAdded:Connect(function(char)
+        task.wait(0.4)
+        InitAntiRagdoll(char)
+    end)))
+    if LP.Character then InitAntiRagdoll(LP.Character) end
+end)
 
--- 脚本监控（防内存泄漏：全局连接一次，不重复建）
-local ScriptMonitorOn=false
-local function setupScriptMonitor()
-    if ScriptMonitorOn then return end
-    ScriptMonitorOn=true
-    GlobalConns:Add(game.DescendantAdded:Connect(function(o)
+local setupScriptMonitor=wrap("setupScriptMonitor",function()
+    TrackConn(game.DescendantAdded:Connect(function(o)
         if o:IsA("LocalScript") or o:IsA("ModuleScript") then
-            local ln=string.lower(o.Name)
-            if ln:find("anti") or ln:find("cheat") or ln:find("detect") 
+            local ln = string.lower(o.Name)
+            if ln:find("anti") or ln:find("cheat") or ln:find("detect")
                or ln:find("security") or ln:find("ac") then
                 task.defer(function()
                     pcall(function()
-                        if o:IsA("LocalScript") then o.Disabled=true end
+                        if o:IsA("LocalScript") then o.Disabled = true end
                     end)
                 end)
             end
         end
     end))
-end
+end)
 
--- 敏感属性读写 hook（防内存泄漏：只 hook 一次，保存在 HI2 标记）
+-- ============ 核心 hook ============
 local IH2=wrap("IH2",function()
     if HI2 then return end
     if not(A2.g and A2.sr)then return end
@@ -1255,7 +1241,6 @@ local IH2=wrap("IH2",function()
     local on=m.__newindex
     local onc=m.__namecall
     if type(oi)~="function"or type(on)~="function"then t2.sr(m,true)return end
-
     local fi=function(s,k)
         if CH2 and s==CH2 and SPF2[k]then
             local ok,v=pcall(oi,s,k)
@@ -1278,9 +1263,7 @@ local IH2=wrap("IH2",function()
             if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.01 then
                 local d=CH2.MoveDirection.Unit
                 local ok,v=pcall(oi,s,k)
-                if k=="CFrame" or k=="Position" then
-                    return ok and v or CR2.CFrame
-                end
+                if k=="CFrame" or k=="Position" then return ok and v or CR2.CFrame end
                 local y=ok and typeof(v)=="Vector3"and v.Y or 0
                 return Vector3.new(d.X*16,y,d.Z*16)
             end
@@ -1303,22 +1286,7 @@ local IH2=wrap("IH2",function()
     if type(onc)=="function"and A2.ncm then
         local fnam=function(s,...)
             local md=t2.ncm()
-            if md=="FireServer"or md=="InvokeServer"then
-                local args={...}
-                for _,a in ipairs(args)do
-                    if type(a)=="table"then
-                        if a.speed or a.walkspeed or a.velocity or a.pos or a.position or a.movement or a.move or a.delta or a.dist then return nil end
-                    elseif type(a)=="Vector3"then
-                        if a.Magnitude>60 then return nil end
-                    elseif type(a)=="CFrame"then
-                        if a.Position.Magnitude>1000 then return nil end
-                    elseif type(a)=="number"then
-                        if a>500 or a<-500 then return nil end
-                    end
-                end
-            end
             if (md=="Kick" or md=="kick") and s==L2 then return nil end
-            if md=="FireServer" and s.Name=="iac-respond" then return nil end
             return onc(s,...)
         end
         m.__namecall=fnam
@@ -1363,71 +1331,173 @@ local SR2=wrap("SR2",function()
     end
 end)
 
+local SM2=wrap("SM2",function()
+    TrackConn(game.DescendantAdded:Connect(function(o)
+        if not SA2(o)then return end
+        if o:IsA("LocalScript")or o:IsA("ModuleScript")then
+            task.defer(function()pcall(function()if o:IsA("LocalScript")then o.Disabled=true end end)end)
+        end
+    end))
+end)
+
+local HD2=wrap("HD2",function()
+    local og=debug.getinfo
+    if type(og)~="function"then return end
+    debug.getinfo=function(...)
+        local i=og(...)
+        if i and i.source and(i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass"))then
+            return {source="=[C]",short_src="[C]",what="C",currentline=-1,linedefined=-1,lastlinedefined=-1,name="Core",namewhat="Local",func=i.func,nups=0}
+        end
+        if i then
+            if i.name then
+                local ln=string.lower(tostring(i.name))
+                for _,bk in ipairs(BAD_KEYS2)do
+                    if ln:find(bk,1,true)then i.name="Core" break end
+                end
+            end
+            if i.namewhat then i.namewhat="Local" end
+        end
+        return i
+    end
+    local ot=debug.traceback
+    if type(ot)=="function" then
+        debug.traceback=function(...)
+            local i=ot(...)
+            if type(i)=="string"then
+                i=i:gsub("XDG[%w_]*","Core")
+                i=i:gsub("Bypass[%w_]*","Core")
+                i=i:gsub("Speed[%w_]*","Core")
+                i=i:gsub("hook[%w_]*","Core")
+            end
+            return i
+        end
+    end
+end)
+
 local pushSpeed=wrap("pushSpeed",function(dt)
     if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
     if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
-
     if isSensitive() then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
         return
     end
-
     if not IG2() then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
         return
     end
-
     local mv=CH2.MoveDirection
     if mv.Magnitude<STOP2 then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
         return
     end
-
     local target=RS2()
     if target<=16 then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
         return
     end
-
     local step=SMOOTH_ACCEL*math.max(dt,0.001)
     if SMOOTH_VEL<target then
         SMOOTH_VEL=math.min(target,SMOOTH_VEL+step)
     elseif SMOOTH_VEL>target then
         SMOOTH_VEL=math.max(target,SMOOTH_VEL-step)
     end
-
     local jitter=1+(math.random()-0.5)*0.1
     local vel=SMOOTH_VEL*jitter
-
     local frameDist=vel*math.max(dt,0.001)
-    if frameDist>MAX_STEP2 then
-        vel=MAX_STEP2/math.max(dt,0.001)
-    end
-
+    if frameDist>MAX_STEP2 then vel=MAX_STEP2/math.max(dt,0.001) end
     local dir=Vector3.new(mv.X,0,mv.Z).Unit
     local cur=CR2.AssemblyLinearVelocity
     local goal=Vector3.new(dir.X*vel,cur.Y,dir.Z*vel)
-
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
-
     lastPushed=os.clock()
     CR2.AssemblyLinearVelocity=goal
     CR2.AssemblyAngularVelocity=Vector3.zero
 end)
 
+-- ============ 新增：无限跳跃 ============
+local setupInfiniteJump=wrap("setupInfiniteJump",function()
+    TrackConn(UserInputService.JumpRequest:Connect(function()
+        if not INF_JUMP then return end
+        if not CR2 or not CR2.Parent or not CH2 or not CH2.Parent then return end
+        if CH2.Health<=0 then return end
+        if isSensitive() then return end
+        pcall(function()
+            local v=CR2.AssemblyLinearVelocity
+            local y=v.Y
+            if y<0 then y=0 end
+            CR2.AssemblyLinearVelocity=Vector3.new(v.X,math.clamp(y+45,0,55),v.Z)
+            CR2.AssemblyAngularVelocity=Vector3.zero
+        end)
+    end))
+end)
+
+-- ============ 新增：穿墙（每0.1秒）============
+local startNoClip=wrap("startNoClip",function()
+    if noclipRunning then return end
+    noclipRunning=true
+    TrackThread(task.spawn(function()
+        while NOCLIP and XDG_MEM.Alive do
+            if CH2 and CH2.Parent then
+                for _,p in ipairs(CH2.Parent:GetDescendants())do
+                    if p:IsA("BasePart")then
+                        if noclipOriginal[p]==nil then noclipOriginal[p]=p.CanCollide end
+                        pcall(function() p.CanCollide=false end)
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+        for p,v in pairs(noclipOriginal)do
+            pcall(function() if p and p.Parent then p.CanCollide=v end end)
+        end
+        noclipOriginal={}
+        noclipRunning=false
+    end))
+end)
+
+-- ============ 新增：跳跃倍率 ============
+local applyJumpModifier=wrap("applyJumpModifier",function(dt)
+    if JUMP_MULT<=1 then return end
+    if not CR2 or not CR2.Parent or not CH2 or not CH2.Parent then return end
+    if isSensitive() then return end
+    local st=CH2:GetState()
+    if st~=Enum.HumanoidStateType.Freefall and st~=Enum.HumanoidStateType.Jumping then return end
+    local v=CR2.AssemblyLinearVelocity
+    if v.Y>0 then
+        local extra=(JUMP_MULT-1)*v.Y*dt*8
+        extra=math.clamp(extra,-50,50)
+        CR2.AssemblyLinearVelocity=Vector3.new(v.X,v.Y+extra,v.Z)
+    end
+end)
+
+-- ============ 新增：重力倍率 ============
+local applyGravityModifier=wrap("applyGravityModifier",function(dt)
+    if math.abs(GRAVITY_MULT-1)<0.01 then return end
+    if not CR2 or not CR2.Parent or not CH2 or not CH2.Parent then return end
+    if isSensitive() then return end
+    local st=CH2:GetState()
+    if st~=Enum.HumanoidStateType.Freefall then return end
+    local v=CR2.AssemblyLinearVelocity
+    local delta=-baseGravity*(GRAVITY_MULT-1)*dt
+    delta=math.clamp(delta,-50,50)
+    CR2.AssemblyLinearVelocity=Vector3.new(v.X,v.Y+delta,v.Z)
+end)
+
 local BC2=wrap("BC2",function(ch)
     if not ch then return end
-    CleanupChar()
-    task.spawn(function()
+    TrackThread(task.spawn(function()
         CH2=ch:WaitForChild("Humanoid",5)
         CR2=ch:WaitForChild("HumanoidRootPart",5)
         HI2=false
         SMOOTH_VEL=0
         lastPos=nil
         lagBackUntil=0
-
         IH2()
+        SM2()
+        HD2()
+        setupInfiniteJump()
+        if NOCLIP then noclipRunning=false startNoClip() end
         setupDeathBlock()
         killSpeedListeners()
         disableUGI()
@@ -1441,33 +1511,37 @@ local BC2=wrap("BC2",function(ch)
         setupAntiRemoteKill()
         setupAntiKick()
         setupAntiBan()
-        setupAntiTeleportBack()
-        setupAntiFlyDetect()
-        setupAntiNoclipDetect()
-        setupAntiFlingServer()
         setupAntiWatchdog()
+        setupHideScript()
+        setupHideFenv()
+        setupHideDebug()
+        setupHideGC()
+        setupAntiCrash()
         setupAntiErrorReport()
         setupAntiIdle()
         setupAdonisHook()
+        setupIACBlock()
         setupAntiRagdoll()
         setupScriptMonitor()
         freezeHumanoidState(CH2)
         blockDeathReplication(CH2)
-    end)
+    end))
 end)
-
 if L2.Character then BC2(L2.Character)end
-GlobalConns:Add(L2.CharacterAdded:Connect(BC2))
+TrackConn(L2.CharacterAdded:Connect(BC2))
 
-GlobalConns:Add(R2.Heartbeat:Connect(function(dt)
+TrackConn(R2.Heartbeat:Connect(function(dt)
     pcall(function()
         if not VERIFY2()then HI2=false task.spawn(function()pcall(IH2)end)end
-        if not SP2 then SMOOTH_VEL=0 return end
         if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
         if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
         updateDeathBlock()
         detectLagBack()
-        pushSpeed(dt)
+        if SP2 then
+            pushSpeed(dt)
+        end
+        applyJumpModifier(dt)
+        applyGravityModifier(dt)
     end)
 end))
 
@@ -1481,17 +1555,21 @@ task.spawn(function()pcall(setupAntiRemoteKill)end)
 task.spawn(function()pcall(setupAntiKick)end)
 task.spawn(function()pcall(setupAntiBan)end)
 task.spawn(function()pcall(setupAntiWatchdog)end)
+task.spawn(function()pcall(setupHideScript)end)
+task.spawn(function()pcall(setupHideFenv)end)
+task.spawn(function()pcall(setupHideDebug)end)
+task.spawn(function()pcall(setupHideGC)end)
 task.spawn(function()pcall(setupAntiErrorReport)end)
 task.spawn(function()pcall(setupAntiIdle)end)
+task.spawn(function()pcall(setupAdonisHook)end)
+task.spawn(function()pcall(setupIACBlock)end)
 
--- 周期性自检（含连接清理，防内存泄漏）
-task.spawn(function()
-    local tickCount=0
-    while genv.XDG_UI_Loaded do
+TrackThread(task.spawn(function()
+    local cycle = 0
+    while XDG_MEM.Alive do
         task.wait(5)
-        tickCount=tickCount+1
         pcall(function()
-            -- hook 完整性
+            cycle = cycle + 1
             if not VERIFY2()then
                 HI2=false
                 task.spawn(function()pcall(IH2)end)
@@ -1500,15 +1578,23 @@ task.spawn(function()
                 freezeHumanoidState(CH2)
                 blockDeathReplication(CH2)
             end
-            -- 连接清理（每 10 秒）
-            if tickCount%2==0 then
-                CharConns:Prune()
-                GlobalConns:Prune()
-                pcall(function() collectgarbage("collect") end)
+            pcall(setupAntiWatchdog)
+            pcall(setupHideGC)
+            if cycle % 6 == 0 then
+                collectgarbage("collect")
+                collectgarbage("collect")
             end
         end)
     end
-end)
+end))
+
+TrackConn(L2.AncestryChanged:Connect(function(_, parent)
+    if not parent then
+        XDG_MEM.Alive = false
+        CleanupConnections()
+        CleanupThreads()
+    end
+end))
 
 local SS2=wrap("SS2",function(v)
     v=tonumber(v)or TARGET_SPEED
@@ -1530,11 +1616,31 @@ SpeedCard.config.value=TARGET_SPEED
 SpeedCard.config.default=TARGET_SPEED
 SpeedCard.config.min=1
 SpeedCard.config.max=200
-SpeedCard.onChange(function(v)
-    SS2(v)
-end)
+SpeedCard.onChange(function(v) SS2(v) end)
 SpeedCard.setVal(TARGET_SPEED)
 SS2(TARGET_SPEED)
+
+AddToggle("无限跳跃"):onChange(function(v) INF_JUMP=v end)
+AddToggle("穿墙 (每0.1s)"):onChange(function(v)
+    NOCLIP=v
+    if v then startNoClip() end
+end)
+
+local JumpCard=AddFeature("跳跃高度倍率")
+JumpCard.config.value=1
+JumpCard.config.default=1
+JumpCard.config.min=1
+JumpCard.config.max=5
+JumpCard.onChange(function(v) JUMP_MULT=v end)
+JumpCard.setVal(1)
+
+local GravCard=AddFeature("重力倍率")
+GravCard.config.value=1
+GravCard.config.default=1
+GravCard.config.min=0.1
+GravCard.config.max=3
+GravCard.onChange(function(v) GRAVITY_MULT=v end)
+GravCard.setVal(1)
 
 REG:OnInsert(function(name,url)
     Library:AddItem(name,function()
@@ -1590,7 +1696,7 @@ REG:OnInsertLog(function(date,scripts)
 end)
 
 local SCRIPT_URLS={"https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"}
-task.spawn(function()
+TrackThread(task.spawn(function()
     for _,u in ipairs(SCRIPT_URLS)do
         local ok,raw=pcall(function()return game:HttpGet(u,true)end)
         if ok and raw and raw~=""then
@@ -1600,5 +1706,7 @@ task.spawn(function()
             warn("[XDG] 拉取失败: "..tostring(u))
         end
     end
-end)
+end))
+
+print("XDG-HOB 加载完成")
 --[[ 代码为 XDG 开发组所有，严禁抄袭、盗用、倒卖等 Copyright (c) XDG Development Group All Rights Reserved. ]]
