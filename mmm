@@ -427,77 +427,33 @@ local function AddFeature(titleText)
     curLbl.TextXAlignment=Enum.TextXAlignment.Left
     curLbl.ZIndex=63
     curLbl.Parent=card
-    local fn={value=16,default=16,min=1,max=200}
+    local fn={value=16,default=16,min=1,max=200,step=1}
     local function upd()local pct=(fn.value-fn.min)/(fn.max-fn.min)barFill.Size=UDim2.new(pct,0,1,0)curLbl.Text=tostring(fn.value).."/"..tostring(fn.default)end
-    local function setVal(v)v=math.clamp(math.floor(v+0.5),fn.min,fn.max)fn.value=v upd()if fn.cb then pcall(fn.cb,v)end end
+    local function setVal(v)
+        v=tonumber(v)or fn.value
+        local step=fn.step or 1
+        v=math.floor(v/step+0.5)*step
+        v=math.clamp(v,fn.min,fn.max)
+        fn.value=v
+        upd()
+        if fn.cb then pcall(fn.cb,v)end
+    end
     local sliding=false
     local function updFromInput(inp)local rel=inp.Position.X-barBg.AbsolutePosition.X local pct=math.clamp(rel/barBg.AbsoluteSize.X,0,1)setVal(fn.min+pct*(fn.max-fn.min))end
     TrackConn(barBg.InputBegan:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=true updFromInput(inp)end end))
     TrackConn(UserInputService.InputEnded:Connect(function(inp)if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then sliding=false end end))
     TrackConn(UserInputService.InputChanged:Connect(function(inp)if sliding and(inp.UserInputType==Enum.UserInputType.MouseMovement or inp.UserInputType==Enum.UserInputType.Touch)then updFromInput(inp)end end))
-    TrackConn(minus.MouseButton1Click:Connect(function()setVal(fn.value-1)end))
-    TrackConn(plus.MouseButton1Click:Connect(function()setVal(fn.value+1)end))
+    TrackConn(minus.MouseButton1Click:Connect(function()setVal(fn.value-(fn.step or 1))end))
+    TrackConn(plus.MouseButton1Click:Connect(function()setVal(fn.value+(fn.step or 1))end))
     upd()
     return{card=card,setVal=setVal,getVal=function()return fn.value end,onChange=function(cb)fn.cb=cb end,config=fn}
-end
-
-local function AddToggle(titleText)
-    FeatureId=FeatureId+1
-    local card=Instance.new("Frame")
-    card.Size=UDim2.new(1,-4,0,36)
-    card.BackgroundColor3=Color3.fromRGB(45,45,55)
-    card.BackgroundTransparency=0.25
-    card.BorderSizePixel=0
-    card.LayoutOrder=FeatureId
-    card.ZIndex=62
-    card.Parent=GenScroll
-    applyCorner(card,6)
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-60,1,0)
-    lbl.Position=UDim2.new(0,8,0,0)
-    lbl.BackgroundTransparency=1
-    lbl.Text=titleText
-    lbl.TextColor3=Color3.fromRGB(255,255,255)
-    lbl.TextSize=11
-    lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.Font=Enum.Font.Antique
-    lbl.ZIndex=63
-    lbl.Parent=card
-    local toggle=Instance.new("TextButton")
-    toggle.Size=UDim2.new(0,44,0,22)
-    toggle.Position=UDim2.new(1,-52,0,7)
-    toggle.BackgroundColor3=Color3.fromRGB(60,60,70)
-    toggle.Text="OFF"
-    toggle.TextColor3=Color3.fromRGB(200,200,200)
-    toggle.TextSize=10
-    toggle.Font=Enum.Font.GothamBold
-    toggle.AutoButtonColor=false
-    toggle.ZIndex=63
-    toggle.Parent=card
-    applyCorner(toggle,11)
-    local state=false
-    local fn={cb=nil}
-    local function upd()
-        if state then
-            tween(toggle,{BackgroundColor3=COLOR.AccentBlue},0.15)
-            toggle.Text="ON"
-            toggle.TextColor3=Color3.fromRGB(255,255,255)
-        else
-            tween(toggle,{BackgroundColor3=Color3.fromRGB(60,60,70)},0.15)
-            toggle.Text="OFF"
-            toggle.TextColor3=Color3.fromRGB(200,200,200)
-        end
-    end
-    TrackConn(toggle.MouseButton1Click:Connect(function()state=not state upd()if fn.cb then pcall(fn.cb,state)end end))
-    upd()
-    return{card=card,getVal=function()return state end,onChange=function(cb)fn.cb=cb end}
 end
 
 GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible if GenFrame.Visible then GenFrame.Size=UDim2.new(1,0,0,0)tween(GenFrame,{Size=UDim2.new(1,0,1,0)},0.24,Enum.EasingStyle.Quint)end end)
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
 -- ============================================================
--- 反作弊绕过模块（已精简，去掉卡顿源）
+-- 反作弊绕过模块（精简版，去掉卡顿源）
 -- ============================================================
 
 local P2=game:GetService("Players")
@@ -514,28 +470,25 @@ local t2={
 local A2={}
 for k,v in pairs(t2)do A2[k]=type(v)=="function"end
 
-local UI_MIN2,UI_MAX2=1,200
+local UI_MIN2,UI_MAX2=5,300
 local MUL2=1
 local STOP2=0.01
-local MAX_STEP2=14.5
-local TARGET_SPEED=26
+local MAX_STEP2=30
+local TARGET_SPEED=60
+local SPEED_STEP=5
 local VELOCITY_MUTATION_LIMIT=3000
-local SMOOTH_VEL=0
-local SMOOTH_ACCEL=60
 local LAG_BACK_COOLDOWN=1.0
 local LAG_BACK_DIST=5
 local LAG_BACK_DOT=-0.5
 
 local SP2=false
-local US2=26
+local US2=60
 local CH2=nil
 local CR2=nil
 local HI2=false
 local ORI2={}
 local ORIGINAL2={}
 local SPF2={WalkSpeed=16,JumpPower=50,JumpHeight=7.2,HipHeight=2}
-local deathBlocked=false
-local deathConns={}
 local lastPos=nil
 local lagBackUntil=0
 local promptOriginal={}
@@ -552,8 +505,6 @@ local function wrap(name,fn)
     end
 end
 
-local function SU2(n)if not n then return false end local l=string.lower(tostring(n))return l:find("anticheat")or l:find("anti_cheat")or l:find("detect")or l:find("cheat")end
-local function SA2(o)if not o or not o.Name then return false end return SU2(o.Name)end
 local function RS2()return math.min(US2*MUL2,MAX_STEP2*60) end
 local function IG2()
     if not CH2 then return false end
@@ -590,7 +541,6 @@ local detectLagBack=wrap("detectLagBack",function()
     local dot=delta.Unit:Dot(mv.Unit)
     if dot<LAG_BACK_DOT then
         lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
-        SMOOTH_VEL=0
         pcall(function()
             local v0=CR2.AssemblyLinearVelocity
             CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
@@ -733,9 +683,7 @@ local setupAntiRagdoll=wrap("setupAntiRagdoll",function()
     if LP.Character then InitAntiRagdoll(LP.Character) end
 end)
 
--- ============================================================
--- 核心 metahook（只伪装读数，不拦写入，速度写入放行）
--- ============================================================
+-- metahook：只伪装读数，写入不拦
 local IH2=wrap("IH2",function()
     if HI2 then return end
     if not(A2.g and A2.sr)then return end
@@ -752,7 +700,6 @@ local IH2=wrap("IH2",function()
     local onc=m.__namecall
     if type(oi)~="function"or type(on)~="function"then t2.sr(m,true)return end
 
-    -- 快速返回：不关心对象直接透传
     local fi=function(s,k)
         if s~=CH2 and s~=CR2 then return oi(s,k) end
         if CH2 and s==CH2 and SPF2[k]then
@@ -771,13 +718,11 @@ local IH2=wrap("IH2",function()
         return oi(s,k)
     end
 
-    -- 关键：写入不拦截，速度写进去直接透传
     local fn=function(s,k,v)
         if CH2 and s==CH2 and SPF2[k]then return end
         return on(s,k,v)
     end
 
-    -- namecall 只拦 Kick
     local fnam=function(s,...)
         local md=t2.ncm()
         if (md=="Kick" or md=="kick") and s==L2 then return nil end
@@ -803,101 +748,76 @@ local function VERIFY2()
     return true
 end
 
--- ============================================================
--- 速度核心
--- ============================================================
+-- 速度核心：无缓冲，直接走直接停
 local pushSpeed=wrap("pushSpeed",function(dt)
-    if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
-    if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
-    if CH2.Health<=0 then SMOOTH_VEL=0 return end
+    if not CR2 or not CR2.Parent then return end
+    if not CH2 or not CH2.Parent then return end
+    if CH2.Health<=0 then return end
+    if isSensitive() then return end
+    if not IG2() then return end
 
-    if isSensitive() then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
+    local mv = CH2.MoveDirection
+    if mv.Magnitude < STOP2 then
+        pcall(function()
+            local v0 = CR2.AssemblyLinearVelocity
+            CR2.AssemblyLinearVelocity = Vector3.new(0, v0.Y, 0)
+            CR2.AssemblyAngularVelocity = Vector3.zero
+        end)
         return
     end
-    if not IG2() then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
-    local mv=CH2.MoveDirection
-    if mv.Magnitude<STOP2 then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
-    local target=RS2()
-    if target<=16 then
-        SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
-        return
-    end
-    local step=SMOOTH_ACCEL*math.max(dt,0.001)
-    if SMOOTH_VEL<target then
-        SMOOTH_VEL=math.min(target,SMOOTH_VEL+step)
-    elseif SMOOTH_VEL>target then
-        SMOOTH_VEL=math.max(target,SMOOTH_VEL-step)
-    end
-    local jitter=1+(math.random()-0.5)*0.1
-    local vel=SMOOTH_VEL*jitter
-    local frameDist=vel*math.max(dt,0.001)
-    if frameDist>MAX_STEP2 then vel=MAX_STEP2/math.max(dt,0.001) end
-    local dir=Vector3.new(mv.X,0,mv.Z).Unit
-    local cur=CR2.AssemblyLinearVelocity
-    local goal=Vector3.new(dir.X*vel,cur.Y,dir.Z*vel)
-    local delta=(goal-cur).Magnitude
-    if delta>VELOCITY_MUTATION_LIMIT then return end
-    CR2.AssemblyLinearVelocity=goal
-    CR2.AssemblyAngularVelocity=Vector3.zero
+
+    local target = RS2()
+    if target <= 16 then return end
+
+    local dir = Vector3.new(mv.X, 0, mv.Z).Unit
+    local cur = CR2.AssemblyLinearVelocity
+    local goal = Vector3.new(dir.X * target, cur.Y, dir.Z * target)
+    local delta = (goal - cur).Magnitude
+    if delta > VELOCITY_MUTATION_LIMIT then return end
+    CR2.AssemblyLinearVelocity = goal
+    CR2.AssemblyAngularVelocity = Vector3.zero
 end)
 
--- ============================================================
--- 角色加载（分批拆帧，不卡）
--- ============================================================
 local BC2=wrap("BC2",function(ch)
     if not ch then return end
     TrackThread(task.spawn(function()
         CH2=ch:WaitForChild("Humanoid",5)
         CR2=ch:WaitForChild("HumanoidRootPart",5)
         HI2=false
-        SMOOTH_VEL=0
         lastPos=nil
         lagBackUntil=0
 
-        -- 第一批：最轻，立即执行
         IH2()
         freezeHumanoidState(CH2)
 
         task.wait()
-        -- 第二批：防断头、防陷阱
         setupHeadGuard(ch,CH2)
         setupAntiTrap()
 
         task.wait()
-        -- 第三批：Prompt 加速、工具保留
         makePromptsInstant()
         setupToolKeeper()
 
         task.wait()
-        -- 第四批：脚本监控、反断连
         setupScriptMonitor()
         setupAntiRagdoll()
 
-        warn("[XDG] 初始化完成，速度 " .. US2)
+        warn("[XDG] 初始化完成，速度 "..US2)
     end))
 end)
 if L2.Character then BC2(L2.Character)end
 TrackConn(L2.CharacterAdded:Connect(BC2))
 
--- 主循环：最高优先级，只跑速度相关
 TrackConn(R2.Heartbeat:Connect(function(dt)
     pcall(function()
-        if not SP2 then SMOOTH_VEL=0 return end
-        if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
-        if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
+        if not SP2 then return end
+        if not CH2 or not CH2.Parent then return end
+        if not CR2 or not CR2.Parent then return end
         detectLagBack()
         pushSpeed(dt)
     end)
 end))
 
--- hook 完整性自检：30 秒一次，非常轻
 TrackThread(task.spawn(function()
     while XDG_MEM.Alive do
         task.wait(30)
@@ -920,16 +840,12 @@ TrackConn(L2.AncestryChanged:Connect(function(_, parent)
     end
 end))
 
--- ============================================================
--- 速度接口
--- ============================================================
 local SS2=wrap("SS2",function(v)
     v=tonumber(v)or TARGET_SPEED
-    v=math.clamp(math.floor(v+0.5),UI_MIN2,UI_MAX2)
+    v=math.clamp(math.floor(v/SPEED_STEP+0.5)*SPEED_STEP,UI_MIN2,UI_MAX2)
     US2=v
     SP2=US2>16
     if not SP2 then
-        SMOOTH_VEL=0
         if CR2 and CR2.Parent then
             local v0=CR2.AssemblyLinearVelocity
             CR2.AssemblyLinearVelocity=Vector3.new(0,v0.Y,0)
@@ -942,8 +858,9 @@ end)
 local SpeedCard=AddFeature("绕过反作弊加速")
 SpeedCard.config.value=TARGET_SPEED
 SpeedCard.config.default=TARGET_SPEED
-SpeedCard.config.min=1
-SpeedCard.config.max=200
+SpeedCard.config.min=UI_MIN2
+SpeedCard.config.max=UI_MAX2
+SpeedCard.config.step=SPEED_STEP
 SpeedCard.onChange(function(v) SS2(v) end)
 SpeedCard.setVal(TARGET_SPEED)
 SS2(TARGET_SPEED)
@@ -1006,7 +923,6 @@ REG:OnInsertLog(function(date,scripts)
     end
 end)
 
--- 最后才加载远程脚本，不阻塞启动
 TrackThread(task.spawn(function()
     task.wait(2)
     local SCRIPT_URLS={"https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"}
