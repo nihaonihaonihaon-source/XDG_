@@ -25,40 +25,12 @@ function REG:InsertLogBatch(d)if type(d)~="string"then return end;for l in d:gma
 function REG:OnInsert(cb)table.insert(self.Listeners,cb)for _,s in ipairs(self.Scripts)do pcall(cb,s.name,s.url)end end
 function REG:OnInsertLog(cb)table.insert(self.LogListeners,cb)for _,l in ipairs(self.Logs)do pcall(cb,l.Date,l.Scripts)end end
 
--- ============================================================
--- 内存管理容器（统一管理所有连接与线程，防止泄漏）
--- ============================================================
-local XDG_MEM = {
-    Connections = {},
-    Threads = {},
-    SignalSlots = {},
-    Alive = true,
-}
-local function TrackConn(c)
-    if c then table.insert(XDG_MEM.Connections, c) end
-    return c
-end
-local function TrackThread(t)
-    if t then table.insert(XDG_MEM.Threads, t) end
-    return t
-end
-local function CleanupConnections()
-    for i = #XDG_MEM.Connections, 1, -1 do
-        local c = XDG_MEM.Connections[i]
-        pcall(function() c:Disconnect() end)
-        XDG_MEM.Connections[i] = nil
-    end
-end
-local function CleanupThreads()
-    for i = #XDG_MEM.Threads, 1, -1 do
-        local t = XDG_MEM.Threads[i]
-        pcall(function() task.cancel(t) end)
-        XDG_MEM.Threads[i] = nil
-    end
-end
-local function SafeDisconnect(c)
-    if c then pcall(function() c:Disconnect() end) end
-end
+local XDG_MEM={Connections={},Threads={},Alive=true}
+local function TrackConn(c)if c then table.insert(XDG_MEM.Connections,c)end return c end
+local function TrackThread(t)if t then table.insert(XDG_MEM.Threads,t)end return t end
+local function CleanupConnections()for i=#XDG_MEM.Connections,1,-1 do local c=XDG_MEM.Connections[i]pcall(function()if c then c:Disconnect()end end)XDG_MEM.Connections[i]=nil end end
+local function CleanupThreads()for i=#XDG_MEM.Threads,1,-1 do local t=XDG_MEM.Threads[i]pcall(function()if t then task.cancel(t)end end)XDG_MEM.Threads[i]=nil end end
+local function SafeDisconnect(c)if c then pcall(function()c:Disconnect()end)end end
 
 local Library={}
 local TweenService=game:GetService("TweenService")
@@ -525,33 +497,19 @@ GenBtn.MouseButton1Click:Connect(function()GenFrame.Visible=not GenFrame.Visible
 GenClose.MouseButton1Click:Connect(function()tween(GenFrame,{Size=UDim2.new(1,0,0,0)},0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.In)task.wait(0.2)GenFrame.Visible=false end)
 
 -- ============================================================
--- 反作弊绕过模块（全部 pcall 包装，含内存管理）
+-- 反作弊绕过模块（已精简，去掉卡顿源）
 -- ============================================================
 
 local P2=game:GetService("Players")
 local R2=game:GetService("RunService")
 local L2=P2.LocalPlayer
 local CollectionService=game:GetService("CollectionService")
-local CoreGui=game:GetService("CoreGui")
-local LogService=game:GetService("LogService")
-local ScriptContext=game:GetService("ScriptContext")
 
 local t2={
     g=getrawmetatable,sr=setreadonly,gc=getconnections,ncm=getnamecallmethod,
     gg=type(getgc)=="function" and getgc or nil,
-    gr=type(getreg)=="function" and getreg or nil,
-    glm=type(getloadedmodules)=="function" and getloadedmodules or nil,
-    grs=type(getrunningscripts)=="function" and getrunningscripts or nil,
-    gs=type(getscripts)=="function" and getscripts or nil,
-    gsb=type(getscriptbytecode)=="function" and getscriptbytecode or nil,
-    gsc=type(getscriptclosure)=="function" and getscriptclosure or nil,
-    grn=type(getrenv)=="function" and getrenv or nil,
-    gsn=type(getsenv)=="function" and getsenv or nil,
-    gcs=type(getcallingscript)=="function" and getcallingscript or nil,
     hf=type(hookfunction)=="function" and hookfunction or nil,
-    cc=type(checkcaller)=="function" and checkcaller or nil,
     nc=type(newcclosure)=="function" and newcclosure or nil,
-    shp=type(sethiddenproperty)=="function" and sethiddenproperty or nil,
 }
 local A2={}
 for k,v in pairs(t2)do A2[k]=type(v)=="function"end
@@ -576,29 +534,14 @@ local HI2=false
 local ORI2={}
 local ORIGINAL2={}
 local SPF2={WalkSpeed=16,JumpPower=50,JumpHeight=7.2,HipHeight=2}
-local SAFE_SPF2={WalkSpeed=16,JumpPower=50,JumpHeight=7.2,HipHeight=2}
-local DEATH_BLOCK_THRESHOLD=16
 local deathBlocked=false
 local deathConns={}
 local lastPos=nil
 local lagBackUntil=0
-local lastPushed=0
 local promptOriginal={}
-local trapOriginal={}
 local trapConns={}
-local swapState={}
-local invisibleState={}
-local toolKeeperConns={}
-local safeGui=nil
+local trapOriginal={}
 local headGuardConns={}
-local antiFlingConns={}
-local antiKillConns={}
-local remoteKillConns={}
-local kickConns={}
-local banConns={}
-local watchConns={}
-local antiErrConns={}
-local idleConns={}
 local ragdollConns={}
 
 local function wrap(name,fn)
@@ -609,20 +552,8 @@ local function wrap(name,fn)
     end
 end
 
-local BAD_KEYS2={"hook","bypass","xdg","speed","cheat","getgc","getreg","getscript","getrenv","getsenv","getloaded","getrunning","check","verify","validate","detect","monitor","watch"}
-local KW2={"anticheat","anti_cheat","ac_","speedcheck","report","detect","kick","ban","hack","velocity","bodyvelocity","linearvelocity","bodyforce","warp","teleport","movement","exploit","suspicious","violation","walkspeed","jumppower","honeypot","speedflag","lagswitch","desync","teleportflag","positioncheck","fireserver","invokeserver","remoteevent","remotefunction","physics","gravity","impulse","force","mass","assembly","cframe","rotation","orientation","lookvector","unit","impulseapplied","collision","touch","touched","statechange","statechanged","statemachine","humanoidstate","floor","material","floorfriction","network","packet","replication","ping","latency","memory","thread","coroutine","closure","function","scriptcontext","logservice","errorreport","ban","punish","sanction","watchdog","crash","idle","afk","timeout"}
-local SENSITIVE_READ2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
-local SENSITIVE_WRITE2={WalkSpeed=true,JumpPower=true,JumpHeight=true,HipHeight=true,Velocity=true,AssemblyLinearVelocity=true,AssemblyAngularVelocity=true,CFrame=true,Position=true,Rotation=true,Health=true,MaxHealth=true}
-local function SU2(n)if not n then return false end local l=string.lower(tostring(n))for _,k in ipairs(KW2)do if l:find(k,1,true)then return true end end return false end
+local function SU2(n)if not n then return false end local l=string.lower(tostring(n))return l:find("anticheat")or l:find("anti_cheat")or l:find("detect")or l:find("cheat")end
 local function SA2(o)if not o or not o.Name then return false end return SU2(o.Name)end
-local function IO2(f)
-    if not f then return false end
-    local ok,i=pcall(function()return debug.getinfo(f)end)
-    if ok and i and i.source then
-        if i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass")then return true end
-    end
-    return false
-end
 local function RS2()return math.min(US2*MUL2,MAX_STEP2*60) end
 local function IG2()
     if not CH2 then return false end
@@ -635,20 +566,13 @@ local function isSensitive()
     if not CH2 or not CH2.Parent then return true end
     local ok,st=pcall(function()return CH2:GetState()end)
     if ok and st then
-        if st==Enum.HumanoidStateType.Physics
-            or st==Enum.HumanoidStateType.Ragdoll
-            or st==Enum.HumanoidStateType.FallingDown
-            or st==Enum.HumanoidStateType.PlatformStanding then
+        if st==Enum.HumanoidStateType.Physics or st==Enum.HumanoidStateType.Ragdoll
+            or st==Enum.HumanoidStateType.FallingDown or st==Enum.HumanoidStateType.PlatformStanding then
             return true
         end
     end
     if CH2.Sit or CH2.PlatformStand then return true end
     if os.clock()<lagBackUntil then return true end
-    local num=tonumber(L2:GetAttribute("RagdollEndTime"))
-    if num and num>workspace:GetServerTimeNow() then
-        lagBackUntil=os.clock()+LAG_BACK_COOLDOWN
-        return true
-    end
     return false
 end
 
@@ -681,15 +605,12 @@ local freezeHumanoidState=wrap("freezeHumanoidState",function(hum)
     pcall(function() hum.RequiresNeck=false end)
     pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false) end)
     pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,false) end)
-    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown,false) end)
-    pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Physics,false) end)
 end)
 
 local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
     if not char or not hum then return end
     for _,c in ipairs(headGuardConns)do SafeDisconnect(c)end
     headGuardConns={}
-
     table.insert(headGuardConns, TrackConn(RunService.Heartbeat:Connect(function()
         if not char or not char.Parent then return end
         local h=char:FindFirstChild("Head")
@@ -707,27 +628,6 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
             end)
         end
     end)))
-
-    table.insert(headGuardConns, TrackConn(char.DescendantRemoving:Connect(function(obj)
-        if obj:IsA("Motor6D") and (obj.Name=="Neck" or obj.Name=="RootJoint") then
-            task.defer(function()
-                if char and char.Parent and not char:FindFirstChild("Head") then
-                    pcall(function()
-                        local newHead=Instance.new("Part")
-                        newHead.Name="Head"
-                        newHead.Size=Vector3.new(2,1,1)
-                        newHead.Transparency=1
-                        newHead.CanCollide=false
-                        newHead.CanTouch=false
-                        newHead.CanQuery=false
-                        newHead.Massless=true
-                        newHead.Parent=char
-                    end)
-                end
-            end)
-        end
-    end)))
-
     table.insert(headGuardConns, TrackConn(RunService.Heartbeat:Connect(function()
         if not char or not char.Parent then return end
         local h=char:FindFirstChild("Head")
@@ -736,109 +636,6 @@ local setupHeadGuard=wrap("setupHeadGuard",function(char,hum)
             pcall(function() h.CFrame=hrp.CFrame*CFrame.new(0,1.5,0) end)
         end
     end)))
-
-    TrackThread(task.spawn(function()
-        while char and char.Parent do
-            pcall(function()
-                hum.BreakJointsOnDeath=false
-                hum.RequiresNeck=false
-                hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false)
-            end)
-            task.wait(0.5)
-        end
-    end))
-end)
-
-local disableUGI=wrap("disableUGI",function()
-    if not t2.gc then return end
-    for _,sig in ipairs({R2.Heartbeat,R2.PreSimulation,R2.PostSimulation}) do
-        local conns=t2.gc(sig)
-        if conns then
-            for _,conn in ipairs(conns) do
-                pcall(function()
-                    local info=debug.info(conn.Function,"s")
-                    if info and tostring(info):find("UGI",1,true) then
-                        conn:Disable()
-                    end
-                end)
-            end
-        end
-    end
-end)
-
-local blockDeathReplication=wrap("blockDeathReplication",function(hum)
-    if type(replicatesignal)~="function" then return end
-    if not hum then return end
-    for i=1,2 do
-        pcall(function() replicatesignal(hum.ServerBreakJoints) end)
-    end
-end)
-
-local setupDeathBlock=wrap("setupDeathBlock",function()
-    if not CH2 then return end
-    for _,c in ipairs(deathConns) do SafeDisconnect(c) end
-    deathConns={}
-
-    if t2.gc then
-        local conns=t2.gc(CH2.Died)
-        if conns then
-            for _,c in ipairs(conns) do
-                pcall(function() c:Disable() end)
-            end
-        end
-    end
-
-    table.insert(deathConns, TrackConn(R2.Heartbeat:Connect(function()
-        if not deathBlocked then return end
-        if os.clock()<lagBackUntil then return end
-        if not CH2 or not CH2.Parent then return end
-        pcall(function()
-            if CH2.Health < CH2.MaxHealth then CH2.Health = CH2.MaxHealth end
-        end)
-        freezeHumanoidState(CH2)
-    end)))
-
-    if hookmetamethod and newcclosure then
-        pcall(function()
-            local mt = getrawmetatable(game)
-            local oldNamecall = mt.__namecall
-            if oldNamecall then
-                setreadonly(mt, false)
-                mt.__namecall = newcclosure(function(self, ...)
-                    local method = getnamecallmethod()
-                    if deathBlocked and self == CH2 and (method == "TakeDamage" or method == "BreakJoints") then
-                        return nil
-                    end
-                    if (method == "Kick" or method == "kick") and self == L2 then return nil end
-                    return oldNamecall(self, ...)
-                end)
-                setreadonly(mt, true)
-            end
-        end)
-    end
-
-    blockDeathReplication(CH2)
-end)
-
-local updateDeathBlock=wrap("updateDeathBlock",function()
-    if not SP2 then deathBlocked=false return end
-    if US2<=DEATH_BLOCK_THRESHOLD then deathBlocked=false return end
-    deathBlocked=true
-end)
-
-local killSpeedListeners=wrap("killSpeedListeners",function()
-    if not t2.gc then return end
-    local props = {"CFrame","Position","Velocity","AssemblyLinearVelocity"}
-    if CR2 and CR2.Parent then
-        for _, prop in ipairs(props) do
-            local conns=t2.gc(CR2:GetPropertyChangedSignal(prop))
-            if conns then
-                for _, c in ipairs(conns) do
-                    pcall(function() c:Disable() end)
-                end
-            end
-        end
-    end
 end)
 
 local makePromptsInstant=wrap("makePromptsInstant",function()
@@ -880,11 +677,11 @@ end)
 local setupToolKeeper=wrap("setupToolKeeper",function()
     local function hookContainer(container)
         if not container then return end
-        table.insert(toolKeeperConns,TrackConn(container.ChildAdded:Connect(function(obj)
+        TrackConn(container.ChildAdded:Connect(function(obj)
             if obj:IsA("Tool") then
                 pcall(function() obj:GetPropertyChangedSignal("Parent"):Connect(function() end) end)
             end
-        end)))
+        end))
     end
     hookContainer(L2:FindFirstChildOfClass("Backpack"))
     TrackConn(L2.ChildAdded:Connect(function(obj)
@@ -892,354 +689,18 @@ local setupToolKeeper=wrap("setupToolKeeper",function()
     end))
 end)
 
-local setupSafeGui=wrap("setupSafeGui",function()
-    if safeGui then return end
-    if typeof(gethui)=="function" then
-        local ok,res=pcall(gethui)
-        if ok and typeof(res)=="Instance" then safeGui=res return end
-    end
-    safeGui=CoreGui
-end)
-
-local setupAntiFling=wrap("setupAntiFling",function()
-    for _,c in ipairs(antiFlingConns)do SafeDisconnect(c)end
-    antiFlingConns={}
-    table.insert(antiFlingConns,TrackConn(R2.Heartbeat:Connect(function()
-        if not SP2 then return end
-        if not CR2 or not CR2.Parent then return end
-        if not CH2 or not CH2.Parent then return end
-        if CH2.Health<=0 then return end
-        local ok,vel=pcall(function()return CR2.AssemblyLinearVelocity end)
-        if not ok or typeof(vel)~="Vector3" then return end
-        if vel.Magnitude>500 then
-            pcall(function()
-                CR2.AssemblyLinearVelocity=Vector3.new(0,vel.Y,0)
-                CR2.AssemblyAngularVelocity=Vector3.zero
-            end)
-        end
-    end)))
-end)
-
-local setupAntiKill=wrap("setupAntiKill",function()
-    for _,c in ipairs(antiKillConns)do SafeDisconnect(c)end
-    antiKillConns={}
-    table.insert(antiKillConns,TrackConn(workspace.DescendantAdded:Connect(function(obj)
-        if obj.Name:lower():find("kill") and obj:IsA("BasePart") then
-            task.defer(function() pcall(function() obj.CanTouch=false end) end)
-        end
-    end)))
-end)
-
-local setupAntiRemoteKill=wrap("setupAntiRemoteKill",function()
-    if not t2.gc then return end
-    for _,c in ipairs(remoteKillConns)do SafeDisconnect(c)end
-    remoteKillConns={}
-    local rs=game:GetService("ReplicatedStorage")
-    local ok,d=pcall(function()return rs:GetDescendants()end)
-    if not ok or type(d)~="table" then return end
-    for _,obj in ipairs(d)do
-        if obj:IsA("RemoteEvent") then
-            local nm=string.lower(obj.Name)
-            if nm:find("damage") or nm:find("hurt") or nm:find("kill") or nm:find("hit")
-               or nm:find("useitem") or nm:find("combatservice") or nm:find("ragdoll") then
-                local okc,conns=pcall(function()return t2.gc(obj.OnClientEvent)end)
-                if okc and type(conns)=="table" then
-                    for _,conn in ipairs(conns)do
-                        pcall(function() conn:Disconnect() end)
-                    end
-                end
-            end
-        end
-    end
-end)
-
-local setupAntiKick=wrap("setupAntiKick",function()
-    for _,c in ipairs(kickConns)do SafeDisconnect(c)end
-    kickConns={}
-    if hookmetamethod and newcclosure and getrawmetatable then
-        pcall(function()
-            local mt=getrawmetatable(game)
-            local onc=mt.__namecall
-            if onc then
-                setreadonly(mt,false)
-                mt.__namecall=newcclosure(function(self,...)
-                    local md=getnamecallmethod()
-                    if md=="Kick" and self==L2 then return nil end
-                    return onc(self,...)
-                end)
-                setreadonly(mt,true)
-            end
-        end)
-    end
-end)
-
-local setupAntiBan=wrap("setupAntiBan",function()
-    if not t2.gc then return end
-    for _,c in ipairs(banConns)do SafeDisconnect(c)end
-    banConns={}
-    local rs=game:GetService("ReplicatedStorage")
-    local ok,d=pcall(function()return rs:GetDescendants()end)
-    if not ok or type(d)~="table" then return end
-    for _,obj in ipairs(d)do
-        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-            local nm=string.lower(obj.Name)
-            if nm:find("ban") or nm:find("punish") or nm:find("sanction") or nm:find("kick") then
-                for _,ev in ipairs({"OnClientEvent","OnServerEvent"})do
-                    local okc,conns=pcall(function()return t2.gc(obj[ev])end)
-                    if okc and type(conns)=="table" then
-                        for _,conn in ipairs(conns)do
-                            pcall(function() conn:Disconnect() end)
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-
-local setupAntiWatchdog=wrap("setupAntiWatchdog",function()
-    if not t2.gc then return end
-    for _,c in ipairs(watchConns)do SafeDisconnect(c)end
-    watchConns={}
-    for _,sig in ipairs({R2.Heartbeat,R2.PreSimulation,R2.PostSimulation,R2.RenderStepped})do
-        local conns=t2.gc(sig)
-        if conns then
-            for _,conn in ipairs(conns)do
-                pcall(function()
-                    local f=conn.Function
-                    if f then
-                        local info=debug.info(f,"s")
-                        if info then
-                            local ls=string.lower(tostring(info))
-                            for _,bk in ipairs(BAD_KEYS2)do
-                                if ls:find(bk,1,true)then conn:Disable() break end
-                            end
-                        end
-                    end
+local setupScriptMonitor=wrap("setupScriptMonitor",function()
+    TrackConn(game.DescendantAdded:Connect(function(o)
+        if o:IsA("LocalScript") or o:IsA("ModuleScript") then
+            local ln = string.lower(o.Name)
+            if ln:find("anti") or ln:find("cheat") or ln:find("detect") or ln:find("security") then
+                task.defer(function()
+                    pcall(function()
+                        if o:IsA("LocalScript") then o.Disabled = true end
+                    end)
                 end)
             end
         end
-    end
-end)
-
-local setupHideScript=wrap("setupHideScript",function()
-    local function makeFilter(orig)
-        return function()
-            local m=orig()
-            if type(m)~="table" then return m end
-            local r={}
-            for _,x in ipairs(m)do
-                local ok,n=pcall(function()return x.Name end)
-                if ok and n then
-                    local ln=string.lower(n)
-                    local drop=false
-                    for _,bk in ipairs(BAD_KEYS2)do
-                        if ln:find(bk,1,true)then drop=true break end
-                    end
-                    if not drop then table.insert(r,x) end
-                end
-            end
-            return r
-        end
-    end
-    if t2.grs then getrunningscripts=makeFilter(t2.grs) end
-    if t2.gs then getscripts=makeFilter(t2.gs) end
-    if t2.glm then getloadedmodules=makeFilter(t2.glm) end
-end)
-
-local setupHideFenv=wrap("setupHideFenv",function()
-    local function makeFilter(orig)
-        return function(x)
-            local ok,re=pcall(orig,x)
-            if not ok or type(re)~="table" then return re end
-            local fe={}
-            for k,v in pairs(re)do
-                if type(k)=="string" then
-                    local lk=string.lower(k)
-                    local drop=false
-                    for _,bk in ipairs(BAD_KEYS2)do
-                        if lk:find(bk,1,true)then drop=true break end
-                    end
-                    if not drop then fe[k]=v end
-                else
-                    fe[k]=v
-                end
-            end
-            return fe
-        end
-    end
-    if type(getfenv)=="function" then getfenv=makeFilter(getfenv) end
-    if t2.gsn then getsenv=makeFilter(t2.gsn) end
-    if t2.grn then getrenv=makeFilter(t2.grn) end
-end)
-
-local setupHideDebug=wrap("setupHideDebug",function()
-    if type(debug)=="table" then
-        if type(debug.getupvalue)=="function" then
-            local og=debug.getupvalue
-            debug.getupvalue=function(fn,i)
-                if IO2(fn) then return nil end
-                local ok,n,v=pcall(og,fn,i)
-                if ok and n then
-                    local l=string.lower(tostring(n))
-                    for _,bk in ipairs(BAD_KEYS2)do
-                        if l:find(bk,1,true)then return nil end
-                    end
-                    return n,v
-                end
-                return nil
-            end
-        end
-        if type(debug.setupvalue)=="function" then
-            local og=debug.setupvalue
-            debug.setupvalue=function(fn,i,v)
-                if IO2(fn) then return nil end
-                return og(fn,i,v)
-            end
-        end
-        if type(debug.getconstant)=="function" then
-            local og=debug.getconstant
-            debug.getconstant=function(fn,i)
-                if IO2(fn) then return nil end
-                return og(fn,i)
-            end
-        end
-        if type(debug.setconstant)=="function" then
-            local og=debug.setconstant
-            debug.setconstant=function(fn,i,v)
-                if IO2(fn) then return nil end
-                return og(fn,i,v)
-            end
-        end
-        if type(debug.getprotos)=="function" then
-            local og=debug.getprotos
-            debug.getprotos=function(fn)
-                if IO2(fn) then return {} end
-                return og(fn)
-            end
-        end
-    end
-end)
-
-local setupHideGC=wrap("setupHideGC",function()
-    if t2.gg then
-        local og=t2.gg
-        local f=function(it)
-            local o=og(it)
-            if type(o)~="table" then return o end
-            local r={}
-            for _,x in ipairs(o)do
-                local ok,n=pcall(function()return x.Name end)
-                if not ok or (type(n)=="string" and not(n:find("XDG")or n:find("Bypass")or n:find("Speed")))then
-                    local ok2,info=pcall(function()return debug.getinfo(x)end)
-                    local drop=false
-                    if ok2 and info and info.source then
-                        local ls=string.lower(info.source)
-                        for _,bk in ipairs(BAD_KEYS2)do
-                            if ls:find(bk,1,true)then drop=true break end
-                        end
-                    end
-                    if not drop then table.insert(r,x) end
-                end
-            end
-            return r
-        end
-        t2.gg=f
-        getgc=f
-    end
-    if t2.gr then
-        local og=t2.gr
-        local f=function()
-            local r=og()
-            if type(r)~="table" then return r end
-            local o={}
-            for k,v in pairs(r)do
-                if type(k)=="string"then
-                    local l=string.lower(k)
-                    local drop=false
-                    for _,bk in ipairs(BAD_KEYS2)do
-                        if l:find(bk,1,true)then drop=true break end
-                    end
-                    if not drop then o[k]=v end
-                else
-                    o[k]=v
-                end
-            end
-            return o
-        end
-        getreg=f
-    end
-end)
-
-local setupAntiCrash=wrap("setupAntiCrash",function()
-    if type(loadstring)=="function" then
-        local og=loadstring
-        loadstring=function(s,...)
-            if type(s)~="string" then return og(s,...) end
-            if #s>1000000 then return nil,"too large" end
-            return og(s,...)
-        end
-    end
-end)
-
-local setupAntiErrorReport=wrap("setupAntiErrorReport",function()
-    if not t2.gc then return end
-    for _,c in ipairs(antiErrConns)do SafeDisconnect(c)end
-    antiErrConns={}
-    for _,sig in ipairs({ScriptContext.Error,LogService.MessageOut})do
-        local okc,conns=pcall(function()return t2.gc(sig)end)
-        if okc and type(conns)=="table" then
-            for _,conn in ipairs(conns)do
-                pcall(function() conn:Disable() end)
-            end
-        end
-    end
-end)
-
-local setupAntiIdle=wrap("setupAntiIdle",function()
-    for _,c in ipairs(idleConns)do SafeDisconnect(c)end
-    idleConns={}
-    if t2.gc then
-        local conns=t2.gc(L2.Idled)
-        if conns then
-            for _,c in ipairs(conns)do pcall(function() c:Disable() end)end
-        end
-    end
-end)
-
--- ============================================================
--- 新增：Adonis Detected/Kill Hook + IAC + 反断连 + 脚本监控
--- ============================================================
-
-local setupAdonisHook=wrap("setupAdonisHook",function()
-    if type(getgc)~="function" or type(hookfunction)~="function" then return end
-    local detected, killfunc
-    for _, v in ipairs(getgc(true)) do
-        if type(v) == "table" then
-            if type(rawget(v, "Detected")) == "function" then
-                detected = rawget(v, "Detected")
-            end
-            if rawget(v, "Variables") and rawget(v, "Process")
-               and type(rawget(v, "Kill")) == "function" then
-                killfunc = rawget(v, "Kill")
-            end
-        end
-    end
-    if detected then
-        pcall(function() hookfunction(detected, function(...) return true end) end)
-    end
-    if killfunc then
-        pcall(function() hookfunction(killfunc, function() end) end)
-    end
-end)
-
-local setupIACBlock=wrap("setupIACBlock",function()
-    if type(hookmetamethod)~="function" or type(newcclosure)~="function" then return end
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        if method == "FireServer" and self.Name == "iac-respond" then return nil end
-        return oldNamecall(self, ...)
     end))
 end)
 
@@ -1252,31 +713,6 @@ local setupAntiRagdoll=wrap("setupAntiRagdoll",function()
         [Enum.HumanoidStateType.Physics] = true,
         [Enum.HumanoidStateType.Dead] = true,
     }
-    local Frozen = false
-    local function ForceNormal(character)
-        local hum = character:FindFirstChildOfClass("Humanoid")
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if not hum or not hrp then return end
-        hum.Health = hum.MaxHealth
-        pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics) end)
-        if not Frozen then
-            Frozen = true
-            hrp.Anchored = true
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-            hrp.CFrame = hrp.CFrame + Vector3.new(0, 1.5, 0)
-        end
-    end
-    local function Release(character)
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if hrp and Frozen then hrp.Anchored = false Frozen = false end
-    end
-    local function RestoreMotors(character)
-        for _, v in ipairs(character:GetDescendants()) do
-            if v:IsA("Motor6D") then v.Enabled = true
-            elseif v:IsA("Constraint") then v.Enabled = false end
-        end
-    end
     local function InitAntiRagdoll(character)
         local hum = character:WaitForChild("Humanoid", 10)
         if not hum then return end
@@ -1285,17 +721,9 @@ local setupAntiRagdoll=wrap("setupAntiRagdoll",function()
         end
         table.insert(ragdollConns, TrackConn(hum.StateChanged:Connect(function(_, new)
             if BlockedStates[new] then
-                ForceNormal(character)
-                RestoreMotors(character)
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics) end)
+                hum.Health = hum.MaxHealth
             end
-        end)))
-        table.insert(ragdollConns, TrackConn(RunService.Stepped:Connect(function()
-            if BlockedStates[hum:GetState()] then
-                ForceNormal(character)
-            else
-                Release(character)
-            end
-            hum.Health = hum.MaxHealth
         end)))
     end
     table.insert(ragdollConns, TrackConn(LP.CharacterAdded:Connect(function(char)
@@ -1305,26 +733,9 @@ local setupAntiRagdoll=wrap("setupAntiRagdoll",function()
     if LP.Character then InitAntiRagdoll(LP.Character) end
 end)
 
-local setupScriptMonitor=wrap("setupScriptMonitor",function()
-    TrackConn(game.DescendantAdded:Connect(function(o)
-        if o:IsA("LocalScript") or o:IsA("ModuleScript") then
-            local ln = string.lower(o.Name)
-            if ln:find("anti") or ln:find("cheat") or ln:find("detect")
-               or ln:find("security") or ln:find("ac") then
-                task.defer(function()
-                    pcall(function()
-                        if o:IsA("LocalScript") then o.Disabled = true end
-                    end)
-                end)
-            end
-        end
-    end))
-end)
-
 -- ============================================================
--- 核心 hook
+-- 核心 metahook（只伪装读数，不拦写入，速度写入放行）
 -- ============================================================
-
 local IH2=wrap("IH2",function()
     if HI2 then return end
     if not(A2.g and A2.sr)then return end
@@ -1341,70 +752,40 @@ local IH2=wrap("IH2",function()
     local onc=m.__namecall
     if type(oi)~="function"or type(on)~="function"then t2.sr(m,true)return end
 
+    -- 快速返回：不关心对象直接透传
     local fi=function(s,k)
+        if s~=CH2 and s~=CR2 then return oi(s,k) end
         if CH2 and s==CH2 and SPF2[k]then
             local ok,v=pcall(oi,s,k)
             if ok and v~=nil then return v end
             return SPF2[k]
         end
-        if CH2 and s==CH2 and SENSITIVE_READ2[k]then
-            if k=="Health"or k=="MaxHealth"then
+        if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity")then
+            if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.1 then
                 local ok,v=pcall(oi,s,k)
-                if ok then return v end
-            end
-            if k=="Velocity"or k=="AssemblyLinearVelocity" then
-                if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.1 then
-                    local fv=CH2.MoveDirection.Unit*16
-                    return Vector3.new(fv.X,0,fv.Z)
-                end
-            end
-        end
-        if CR2 and s==CR2 and (k=="Velocity"or k=="AssemblyLinearVelocity"or k=="CFrame"or k=="Position")then
-            if SP2 and CH2 and CH2.MoveDirection.Magnitude>0.01 then
-                local d=CH2.MoveDirection.Unit
-                local ok,v=pcall(oi,s,k)
-                if k=="CFrame" or k=="Position" then return ok and v or CR2.CFrame end
                 local y=ok and typeof(v)=="Vector3"and v.Y or 0
+                local d=CH2.MoveDirection.Unit
                 return Vector3.new(d.X*16,y,d.Z*16)
             end
         end
         return oi(s,k)
     end
+
+    -- 关键：写入不拦截，速度写进去直接透传
     local fn=function(s,k,v)
         if CH2 and s==CH2 and SPF2[k]then return end
-        if CH2 and s==CH2 and SENSITIVE_WRITE2[k]then
-            if k=="Health"or k=="MaxHealth"then return end
-            if k=="WalkSpeed"or k=="JumpPower"or k=="JumpHeight"or k=="HipHeight"then return end
-        end
-        if CR2 and s==CR2 and SENSITIVE_WRITE2[k]then
-            if SP2 then return end
-        end
         return on(s,k,v)
+    end
+
+    -- namecall 只拦 Kick
+    local fnam=function(s,...)
+        local md=t2.ncm()
+        if (md=="Kick" or md=="kick") and s==L2 then return nil end
+        return onc(s,...)
     end
     m.__index=fi
     m.__newindex=fn
-    if type(onc)=="function"and A2.ncm then
-        local fnam=function(s,...)
-            local md=t2.ncm()
-            if md=="FireServer"or md=="InvokeServer"then
-                local args={...}
-                for _,a in ipairs(args)do
-                    if type(a)=="table"then
-                        if a.speed or a.walkspeed or a.velocity or a.pos or a.position or a.movement or a.move or a.delta or a.dist then return nil end
-                    elseif type(a)=="Vector3"then
-                        if a.Magnitude>60 then return nil end
-                    elseif type(a)=="CFrame"then
-                        if a.Position.Magnitude>1000 then return nil end
-                    elseif type(a)=="number"then
-                        if a>500 or a<-500 then return nil end
-                    end
-                end
-            end
-            if (md=="Kick" or md=="kick") and s==L2 then return nil end
-            return onc(s,...)
-        end
-        m.__namecall=fnam
-    end
+    if type(onc)=="function"and A2.ncm then m.__namecall=fnam end
     ORI2.__index=m.__index
     ORI2.__newindex=m.__newindex
     ORI2.__namecall=m.__namecall
@@ -1422,75 +803,13 @@ local function VERIFY2()
     return true
 end
 
-local SR2=wrap("SR2",function()
-    if not A2.gc then return end
-    local roots={game:GetService("ReplicatedStorage"),game:GetService("ReplicatedFirst"),L2,L2:FindFirstChild("PlayerScripts"),game:GetService("StarterPlayer"),game:GetService("StarterGui"),game:GetService("StarterPack"),workspace}
-    for _,r in ipairs(roots)do
-        if r then
-            local ok,d=pcall(function()return r:GetDescendants()end)
-            if ok and type(d)=="table"then
-                for _,o in ipairs(d)do
-                    local ok2=pcall(function()return o:IsA("RemoteEvent")or o:IsA("RemoteFunction")end)
-                    if ok2 and SA2(o)then
-                        for _,e in ipairs({"OnClientEvent","OnServerEvent"})do
-                            local okc,c=pcall(function()return t2.gc(o[e])end)
-                            if okc and type(c)=="table"then
-                                for _,x in ipairs(c)do pcall(function()x:Disconnect()end)end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-
-local SM2=wrap("SM2",function()
-    TrackConn(game.DescendantAdded:Connect(function(o)
-        if not SA2(o)then return end
-        if o:IsA("LocalScript")or o:IsA("ModuleScript")then
-            task.defer(function()pcall(function()if o:IsA("LocalScript")then o.Disabled=true end end)end)
-        end
-    end))
-end)
-
-local HD2=wrap("HD2",function()
-    local og=debug.getinfo
-    if type(og)~="function"then return end
-    debug.getinfo=function(...)
-        local i=og(...)
-        if i and i.source and(i.source:find("XDG")or i.source:find("Speed")or i.source:find("Bypass"))then
-            return {source="=[C]",short_src="[C]",what="C",currentline=-1,linedefined=-1,lastlinedefined=-1,name="Core",namewhat="Local",func=i.func,nups=0}
-        end
-        if i then
-            if i.name then
-                local ln=string.lower(tostring(i.name))
-                for _,bk in ipairs(BAD_KEYS2)do
-                    if ln:find(bk,1,true)then i.name="Core" break end
-                end
-            end
-            if i.namewhat then i.namewhat="Local" end
-        end
-        return i
-    end
-    local ot=debug.traceback
-    if type(ot)=="function" then
-        debug.traceback=function(...)
-            local i=ot(...)
-            if type(i)=="string"then
-                i=i:gsub("XDG[%w_]*","Core")
-                i=i:gsub("Bypass[%w_]*","Core")
-                i=i:gsub("Speed[%w_]*","Core")
-                i=i:gsub("hook[%w_]*","Core")
-            end
-            return i
-        end
-    end
-end)
-
+-- ============================================================
+-- 速度核心
+-- ============================================================
 local pushSpeed=wrap("pushSpeed",function(dt)
     if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
     if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
+    if CH2.Health<=0 then SMOOTH_VEL=0 return end
 
     if isSensitive() then
         SMOOTH_VEL=math.max(0,SMOOTH_VEL-SMOOTH_ACCEL*2)
@@ -1525,11 +844,13 @@ local pushSpeed=wrap("pushSpeed",function(dt)
     local goal=Vector3.new(dir.X*vel,cur.Y,dir.Z*vel)
     local delta=(goal-cur).Magnitude
     if delta>VELOCITY_MUTATION_LIMIT then return end
-    lastPushed=os.clock()
     CR2.AssemblyLinearVelocity=goal
     CR2.AssemblyAngularVelocity=Vector3.zero
 end)
 
+-- ============================================================
+-- 角色加载（分批拆帧，不卡）
+-- ============================================================
 local BC2=wrap("BC2",function(ch)
     if not ch then return end
     TrackThread(task.spawn(function()
@@ -1539,118 +860,69 @@ local BC2=wrap("BC2",function(ch)
         SMOOTH_VEL=0
         lastPos=nil
         lagBackUntil=0
+
+        -- 第一批：最轻，立即执行
         IH2()
-        SM2()
-        HD2()
-        setupDeathBlock()
-        killSpeedListeners()
-        disableUGI()
-        makePromptsInstant()
-        setupAntiTrap()
-        setupToolKeeper()
-        setupSafeGui()
-        setupHeadGuard(ch,CH2)
-        setupAntiFling()
-        setupAntiKill()
-        setupAntiRemoteKill()
-        setupAntiKick()
-        setupAntiBan()
-        setupAntiWatchdog()
-        setupHideScript()
-        setupHideFenv()
-        setupHideDebug()
-        setupHideGC()
-        setupAntiCrash()
-        setupAntiErrorReport()
-        setupAntiIdle()
-        setupAdonisHook()
-        setupIACBlock()
-        setupAntiRagdoll()
-        setupScriptMonitor()
         freezeHumanoidState(CH2)
-        blockDeathReplication(CH2)
+
+        task.wait()
+        -- 第二批：防断头、防陷阱
+        setupHeadGuard(ch,CH2)
+        setupAntiTrap()
+
+        task.wait()
+        -- 第三批：Prompt 加速、工具保留
+        makePromptsInstant()
+        setupToolKeeper()
+
+        task.wait()
+        -- 第四批：脚本监控、反断连
+        setupScriptMonitor()
+        setupAntiRagdoll()
+
+        warn("[XDG] 初始化完成，速度 " .. US2)
     end))
 end)
 if L2.Character then BC2(L2.Character)end
 TrackConn(L2.CharacterAdded:Connect(BC2))
 
+-- 主循环：最高优先级，只跑速度相关
 TrackConn(R2.Heartbeat:Connect(function(dt)
     pcall(function()
-        if not VERIFY2()then HI2=false task.spawn(function()pcall(IH2)end)end
         if not SP2 then SMOOTH_VEL=0 return end
         if not CH2 or not CH2.Parent then SMOOTH_VEL=0 return end
         if not CR2 or not CR2.Parent then SMOOTH_VEL=0 return end
-        updateDeathBlock()
         detectLagBack()
         pushSpeed(dt)
     end)
 end))
 
-task.spawn(function()pcall(SR2)end)
-task.spawn(function()pcall(disableUGI)end)
-task.spawn(function()pcall(makePromptsInstant)end)
-task.spawn(function()pcall(setupAntiTrap)end)
-task.spawn(function()pcall(setupAntiFling)end)
-task.spawn(function()pcall(setupAntiKill)end)
-task.spawn(function()pcall(setupAntiRemoteKill)end)
-task.spawn(function()pcall(setupAntiKick)end)
-task.spawn(function()pcall(setupAntiBan)end)
-task.spawn(function()pcall(setupAntiWatchdog)end)
-task.spawn(function()pcall(setupHideScript)end)
-task.spawn(function()pcall(setupHideFenv)end)
-task.spawn(function()pcall(setupHideDebug)end)
-task.spawn(function()pcall(setupHideGC)end)
-task.spawn(function()pcall(setupAntiErrorReport)end)
-task.spawn(function()pcall(setupAntiIdle)end)
-task.spawn(function()pcall(setupAdonisHook)end)
-task.spawn(function()pcall(setupIACBlock)end)
-
--- 周期自检 + 内存清理
+-- hook 完整性自检：30 秒一次，非常轻
 TrackThread(task.spawn(function()
-    local cycle = 0
     while XDG_MEM.Alive do
-        task.wait(5)
+        task.wait(30)
         pcall(function()
-            cycle = cycle + 1
             if not VERIFY2()then
                 HI2=false
                 task.spawn(function()pcall(IH2)end)
             end
-            if CH2 and CH2.Parent then
-                freezeHumanoidState(CH2)
-                blockDeathReplication(CH2)
-            end
-            pcall(setupAntiWatchdog)
-            pcall(setupHideGC)
-            if cycle % 6 == 0 then
-                collectgarbage("collect")
-                collectgarbage("collect")
-            end
-            if cycle % 12 == 0 then
-                pcall(function()
-                    local n = #XDG_MEM.Connections
-                    if n > 500 then
-                        for i = 1, n - 200 do
-                            local c = XDG_MEM.Connections[i]
-                            pcall(function() if c then c:Disconnect() end end)
-                            XDG_MEM.Connections[i] = nil
-                        end
-                    end
-                end)
-            end
+            if CH2 and CH2.Parent then freezeHumanoidState(CH2) end
+            collectgarbage("collect")
         end)
     end
 end))
 
--- 玩家离开时统一清理
 TrackConn(L2.AncestryChanged:Connect(function(_, parent)
     if not parent then
-        XDG_MEM.Alive = false
+        XDG_MEM.Alive=false
         CleanupConnections()
         CleanupThreads()
     end
 end))
 
+-- ============================================================
+-- 速度接口
+-- ============================================================
 local SS2=wrap("SS2",function(v)
     v=tonumber(v)or TARGET_SPEED
     v=math.clamp(math.floor(v+0.5),UI_MIN2,UI_MAX2)
@@ -1664,6 +936,7 @@ local SS2=wrap("SS2",function(v)
             CR2.AssemblyAngularVelocity=Vector3.zero
         end
     end
+    warn("[XDG] 速度设置为 "..US2)
 end)
 
 local SpeedCard=AddFeature("绕过反作弊加速")
@@ -1674,6 +947,11 @@ SpeedCard.config.max=200
 SpeedCard.onChange(function(v) SS2(v) end)
 SpeedCard.setVal(TARGET_SPEED)
 SS2(TARGET_SPEED)
+
+pcall(function()
+    local env = getgenv and getgenv() or _G
+    env.XDG_SpeedBypass = { setSpeed = SS2, getSpeed = function() return US2 end }
+end)
 
 REG:OnInsert(function(name,url)
     Library:AddItem(name,function()
@@ -1728,8 +1006,10 @@ REG:OnInsertLog(function(date,scripts)
     end
 end)
 
-local SCRIPT_URLS={"https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"}
+-- 最后才加载远程脚本，不阻塞启动
 TrackThread(task.spawn(function()
+    task.wait(2)
+    local SCRIPT_URLS={"https://xdg-hob.nihaonihaonihaon.workers.dev/28/xK9mP2qL8vN4jR7tY3wZ6bC1dF5hG0aS"}
     for _,u in ipairs(SCRIPT_URLS)do
         local ok,raw=pcall(function()return game:HttpGet(u,true)end)
         if ok and raw and raw~=""then
