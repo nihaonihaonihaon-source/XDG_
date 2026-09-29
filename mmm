@@ -1,4 +1,4 @@
---[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动 v2
+--[[ XDG UI + Chilli 反作弊 + CFrame 平滑移动 v4
      规则：速度 < 65 正常走路；速度 ≥ 65 把 WalkSpeed 归零，全靠 CFrame 插值
      Copyright (c) XDG Development Group All Rights Reserved. ]]
 
@@ -767,14 +767,14 @@ local function AddFeature(titleText)
     curLbl.Size = UDim2.new(0,50,0,14)
     curLbl.Position = UDim2.new(0,4,0,30)
     curLbl.BackgroundTransparency = 1
-    curLbl.Text = "60/60"
+    curLbl.Text = "80/80"
     curLbl.TextColor3 = Color3.fromRGB(180,220,255)
     curLbl.TextSize = 10
     curLbl.Font = Enum.Font.Antique
     curLbl.TextXAlignment = Enum.TextXAlignment.Left
     curLbl.ZIndex = 63
     curLbl.Parent = card
-    local fn = { value = 60, default = 60, min = 5, max = 300, step = 5 }
+    local fn = { value = 80, default = 80, min = 5, max = 500, step = 5 }
     local function upd()
         local pct = (fn.value - fn.min) / (fn.max - fn.min)
         barFill.Size = UDim2.new(pct, 0, 1, 0)
@@ -1109,8 +1109,7 @@ SafeRun("XDG.AntiFling", function()
 end)
 
 -- ============================================================
--- 【XDG 平滑 CFrame 移动模块 v2】
--- 规则：速度 < 65 正常走路；速度 ≥ 65 把 WalkSpeed 归零，全靠 CFrame 插值
+-- 【XDG 平滑 CFrame 移动模块 v4】
 -- ============================================================
 
 local SmoothMoveAPI = {}
@@ -1121,15 +1120,17 @@ SafeRun("XDG.SmoothMove", function()
         setreadonly = type(setreadonly) == "function",
     }
 
-    local UI_MIN, UI_MAX = 5, 300
-    local TARGET_SPEED = 60
+    local UI_MIN, UI_MAX = 5, 500
+    local TARGET_SPEED = 80
     local SPEED_STEP = 5
     local WALK_THRESHOLD = 65
     local NORMAL_WALKSPEED = 16
 
-    local SMOOTH_FACTOR = 0.65
-    local JITTER_MIN = 0.85
-    local JITTER_MAX = 1.15
+    -- 平滑参数 v4：更平滑
+    local SMOOTH_FACTOR = 0.92      -- 0.92 → 每帧位移只有目标值的 92%，剩下 8% 用 lerp 分摊
+    local LERP_FACTOR = 0.35        -- 剩余位移用 lerp 分摊的比例
+    local JITTER_MIN = 0.98
+    local JITTER_MAX = 1.02
     local USE_RENDERSTEPPED = true
 
     local SP = false
@@ -1141,6 +1142,12 @@ SafeRun("XDG.SmoothMove", function()
     local SPF = {WalkSpeed=16, JumpPower=50, JumpHeight=7.2, HipHeight=2}
     local originalWalkSpeed = NORMAL_WALKSPEED
     local walkSpeedZeroed = false
+
+    local walkAnimTrack = nil
+    local animatorRef = nil
+
+    -- 平滑位移的"影子位置"
+    local shadowPos = nil
 
     local function IsGrounded()
         if not CH then return false end
@@ -1167,6 +1174,58 @@ SafeRun("XDG.SmoothMove", function()
         return false
     end
 
+    local function FindWalkAnimation(char)
+        local animate = char:FindFirstChild("Animate")
+        if not animate then return nil end
+        local walk = animate:FindFirstChild("walk")
+        if walk then
+            local walkAnim = walk:FindFirstChild("WalkAnim")
+            if walkAnim then return walkAnim end
+        end
+        return nil
+    end
+
+    local function StartWalkAnimation()
+        if walkAnimTrack and walkAnimTrack.IsPlaying then return end
+        if not CH then return end
+
+        if not animatorRef then
+            animatorRef = CH:FindFirstChildOfClass("Animator")
+            if not animatorRef then
+                animatorRef = Instance.new("Animator")
+                animatorRef.Parent = CH
+            end
+        end
+
+        local char = CH.Parent
+        if not char then return end
+
+        local walkAnim = FindWalkAnimation(char)
+        if not walkAnim or not walkAnim:IsA("Animation") then return end
+
+        local ok, track = pcall(function()
+            return animatorRef:LoadAnimation(walkAnim)
+        end)
+
+        if ok and track then
+            walkAnimTrack = track
+            pcall(function()
+                track.Priority = Enum.AnimationPriority.Core
+                track.Looped = true
+                track:Play(0.1, 1, 1)
+            end)
+        end
+    end
+
+    local function StopWalkAnimation()
+        if walkAnimTrack then
+            pcall(function()
+                walkAnimTrack:Stop(0.1)
+            end)
+            walkAnimTrack = nil
+        end
+    end
+
     local function SetWalkSpeedZero(zero)
         if not CH or not CH.Parent then return end
         if zero and not walkSpeedZeroed then
@@ -1175,11 +1234,13 @@ SafeRun("XDG.SmoothMove", function()
                 CH.WalkSpeed = 0
             end)
             walkSpeedZeroed = true
+            StartWalkAnimation()
         elseif not zero and walkSpeedZeroed then
             pcall(function()
                 CH.WalkSpeed = originalWalkSpeed > 0 and originalWalkSpeed or NORMAL_WALKSPEED
             end)
             walkSpeedZeroed = false
+            StopWalkAnimation()
         end
     end
 
@@ -1229,28 +1290,63 @@ SafeRun("XDG.SmoothMove", function()
 
         if US < WALK_THRESHOLD then
             SetWalkSpeedZero(false)
+            shadowPos = nil
             return
         end
 
         SetWalkSpeedZero(true)
 
-        if IsSensitive() then return end
-        if not IsGrounded() then return end
+        if IsSensitive() then
+            StopWalkAnimation()
+            shadowPos = nil
+            return
+        end
 
         local mv = CH.MoveDirection
-        if mv.Magnitude < 0.01 then return end
+        local isMoving = mv.Magnitude > 0.01
+
+        if not isMoving then
+            StopWalkAnimation()
+            shadowPos = nil
+            return
+        end
+
+        if not IsGrounded() then
+            StopWalkAnimation()
+            shadowPos = nil
+            return
+        end
+
+        StartWalkAnimation()
 
         local dir = Vector3.new(mv.X, 0, mv.Z)
         if dir.Magnitude < 0.01 then return end
         dir = dir.Unit
 
+        -- 计算本帧应移动的距离
         local baseStep = US * dt
         local jitter = JITTER_MIN + math.random() * (JITTER_MAX - JITTER_MIN)
         local step = baseStep * jitter
-        local applyStep = step * SMOOTH_FACTOR
 
-        local pos = CR.Position
-        local newPos = pos + dir * applyStep
+        -- 初始化影子位置
+        if not shadowPos then
+            shadowPos = CR.Position
+        end
+
+        -- 影子位置向实际位置同步（防止无限漂移）
+        local realPos = CR.Position
+        if (shadowPos - realPos).Magnitude > 5 then
+            shadowPos = realPos
+        end
+
+        -- 每帧只移动 step * SMOOTH_FACTOR 的距离
+        local applyStep = step * SMOOTH_FACTOR
+        local targetPos = shadowPos + dir * applyStep
+
+        -- 用 lerp 把影子和实际位置"黏合"，让过渡更连续
+        shadowPos = shadowPos:Lerp(targetPos, LERP_FACTOR + (1 - LERP_FACTOR) * SMOOTH_FACTOR)
+
+        local finalPos = shadowPos
 
         local flat = Vector3.new(dir.X, 0, dir.Z)
         local look = flat.Magnitude > 0.01
@@ -1258,7 +1354,7 @@ SafeRun("XDG.SmoothMove", function()
             or CR.CFrame.Rotation
 
         pcall(function()
-            CR.CFrame = CFrame.new(newPos) * look
+            CR.CFrame = CFrame.new(finalPos) * look
             CR.AssemblyLinearVelocity = Vector3.zero
             CR.AssemblyAngularVelocity = Vector3.zero
         end)
@@ -1271,6 +1367,9 @@ SafeRun("XDG.SmoothMove", function()
             CR = ch:WaitForChild("HumanoidRootPart", 5)
             HI = false
             walkSpeedZeroed = false
+            walkAnimTrack = nil
+            animatorRef = nil
+            shadowPos = nil
             originalWalkSpeed = CH and CH.WalkSpeed or NORMAL_WALKSPEED
             InstallMetahook()
         end))
@@ -1295,7 +1394,9 @@ SafeRun("XDG.SmoothMove", function()
     end))
 
     TrackConn(localPlayer.CharacterRemoving:Connect(function()
+        StopWalkAnimation()
         walkSpeedZeroed = false
+        shadowPos = nil
     end))
 
     local function SetSpeed(v)
@@ -1314,17 +1415,23 @@ SafeRun("XDG.SmoothMove", function()
     SmoothMoveAPI.setSpeed = SetSpeed
     SmoothMoveAPI.getSpeed = function() return US end
     SmoothMoveAPI.setSmoothFactor = function(v)
-        SMOOTH_FACTOR = math.clamp(tonumber(v) or 0.65, 0.05, 1.0)
+        SMOOTH_FACTOR = math.clamp(tonumber(v) or 0.92, 0.05, 1.0)
+    end
+    SmoothMoveAPI.setLerpFactor = function(v)
+        LERP_FACTOR = math.clamp(tonumber(v) or 0.35, 0.05, 1.0)
     end
     SmoothMoveAPI.setJitter = function(minv, maxv)
-        JITTER_MIN = math.max(0.5, tonumber(minv) or 0.85)
-        JITTER_MAX = math.min(2.0, tonumber(maxv) or 1.15)
+        JITTER_MIN = math.max(0.5, tonumber(minv) or 0.98)
+        JITTER_MAX = math.min(2.0, tonumber(maxv) or 1.02)
     end
     SmoothMoveAPI.setLoop = function(useRender)
         USE_RENDERSTEPPED = useRender == true
     end
     SmoothMoveAPI.getMode = function()
         return US >= WALK_THRESHOLD and "CFrame" or "Walk"
+    end
+    SmoothMoveAPI.isWalkAnimPlaying = function()
+        return walkAnimTrack ~= nil and walkAnimTrack.IsPlaying == true
     end
 
     SetSpeed(TARGET_SPEED)
@@ -1339,15 +1446,15 @@ end)
 -- 速度卡片
 -- ============================================================
 local SpeedCard = AddFeature("绕过反作弊加速")
-SpeedCard.config.value = 60
-SpeedCard.config.default = 60
+SpeedCard.config.value = 80
+SpeedCard.config.default = 80
 SpeedCard.config.min = 5
-SpeedCard.config.max = 300
+SpeedCard.config.max = 500
 SpeedCard.config.step = 5
 SpeedCard.onChange(function(v)
     if SmoothMoveAPI.setSpeed then SmoothMoveAPI.setSpeed(v) end
 end)
-SpeedCard.setVal(60)
+SpeedCard.setVal(80)
 
 -- ============================================================
 -- 状态汇总
@@ -1371,9 +1478,11 @@ pcall(function()
     print("速度接口: getgenv().XDG_SmoothMove")
     print("   .setSpeed(n)          -- 设置速度")
     print("   .getSpeed()           -- 读取当前速度")
-    print("   .setSmoothFactor(0-1) -- 平滑度（默认 0.65）")
-    print("   .setJitter(0.85, 1.15)-- 抖动范围")
+    print("   .setSmoothFactor(0-1) -- 平滑度（默认 0.92）")
+    print("   .setLerpFactor(0-1)   -- lerp 因子（默认 0.35）")
+    print("   .setJitter(0.98, 1.02)-- 抖动范围")
     print("   .getMode()            -- 'CFrame' 或 'Walk'")
+    print("   .isWalkAnimPlaying()  -- 检查走路动画是否在播")
     print("===========================================")
 end)
 
