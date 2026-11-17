@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luau Universal VM Obfuscator - Enterprise v10.2</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#05070a;color:#c9d1d9;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:18px 22px;border-bottom:1px solid #1f242c;background:#0d1117}h1{margin:0;font-size:22px;color:#58a6ff}.sub{color:#8b949e;font-size:12px;margin-top:6px}
+main{max-width:1600px;margin:auto;padding:16px}.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:15px}
+button,select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px 14px;cursor:pointer;transition:0.2s;font-size:14px}
+button:hover{background:#30363d;border-color:#8b949e}button:disabled{opacity:.5;cursor:wait}
+#go{background:#238636;border-color:#2ea043;color:#fff}#go:hover{background:#2ea043}
+#bigtest{background:#8957e5;border-color:#a371f7;color:#fff}#bigtest:hover{background:#a371f7}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.box{border:1px solid #30363d;border-radius:8px;overflow:hidden;background:#0d1117}.title{padding:10px 14px;border-bottom:1px solid #30363d;color:#8b949e;font-size:13px;font-weight:bold;background:#161b22}
+textarea{width:100%;height:600px;background:#05070a;color:#a5d6ff;border:0;outline:0;resize:vertical;padding:14px;font:13px/1.6 ui-monospace,Consolas,monospace}
+#status{margin-top:12px;padding:12px;border-radius:6px;background:#161b22;border:1px solid #30363d;color:#8b949e;white-space:pre-wrap;font-size:13px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}textarea{height:400px}}
+</style>
+</head>
+<body>
+
+<div id="legal-modal" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.9);z-index:9999;display:flex;align-items:center;justify-content:center;">
+  <div style="background:#161b22;padding:35px;border-radius:12px;border:1px solid #30363d;max-width:650px;line-height:1.7;box-shadow:0 10px 40px rgba(0,0,0,0.8);">
+    <h2 style="color:#f85149;margin-top:0;border-bottom:1px solid #30363d;padding-bottom:15px;font-size:20px;">⚠️ 知识产权保护与使用协议 (强制阅读)</h2>
+    <p style="color:#c9d1d9;font-size:14px;text-align:justify;">
+      1. 本工具（Luau Universal VM Obfuscator）仅供 <b>合法的软件知识产权保护、代码混淆与逆向工程技术研究</b> 使用。<br><br>
+      2. 使用者必须保证所混淆的代码为原创或拥有合法授权。严禁使用本工具混淆任何恶意代码、木马病毒、勒索软件、游戏外挂及任何违反所在国家/地区法律法规的内容。<br><br>
+      3. 本工具作者仅提供算法层面的代码保护技术，不对使用者混淆的具体内容进行审核、背书或承担连带责任。<br><br>
+      4. <b>免责条款：</b>任何因使用者违规使用本工具（包括但不限于侵犯计算机信息系统安全、破坏他人计算机系统、侵犯他人合法权益等）而产生的法律责任、经济纠纷与后果，<b>均由使用者本人独自承担，与本工具作者无关。</b>
+    </p>
+    <div style="text-align:right;margin-top:25px;">
+      <button id="btn-agree" disabled style="padding:12px 24px;font-size:16px;border-radius:6px;background:#30363d;color:#8b949e;border:1px solid #30363d;cursor:not-allowed;transition:0.3s;">请阅读 (5s)</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <h1>Luau Universal VM Obfuscator <small>v10.2 Ultimate</small></h1>
+  <div class="sub">无特征外壳 | 安全 NOP 膨胀 | CRC 完整性校验 | 完美反制</div>
+</header>
+<main>
+<div class="bar">
+  <select id="target">
+    <option value="luau">Roblox / Luau 执行器专用</option>
+    <option value="lua51">标准 Lua 5.1 兼容</option>
+    <option value="lua53">标准 Lua 5.3+ 兼容</option>
+  </select>
+  <select id="mode">
+    <option value="vm_pack40" selected>VM + 极限封装 (安全模式)</option>
+    <option value="vm_min">VM + 紧凑化 (极速模式)</option>
+    <option value="vm">VM (纯 VM 模式)</option>
+    <option value="min">仅压缩 (Minify)</option>
+  </select>
+  <button id="go">编译生成</button>
+  <button id="bigtest">生成 10 万字节大脚本</button>
+  <button id="copy">复制代码</button>
+</div>
+<div class="grid">
+<div class="box"><div class="title">输入测试代码 (中英双语 Hello World)</div><textarea id="src">-- 这是一个无害的测试代码，用于验证混淆器的兼容性与安全性
+local function greet(name)
+    local msg = "你好，世界！ Hello, " .. name .. " 😊"
+    print(msg)
+    return msg
+end
+
+local counter = 0
+local function makeCounter()
+    return function()
+        counter = counter + 1
+        return counter
+    end
+end
+
+local c = makeCounter()
+print(c()) -- 1
+print(c()) -- 2
+
+local Obj = { name = "VM_Test_中文" }
+function Obj:say()
+    print("Object says: " .. self.name)
+end
+Obj:say()
+
+greet("Developer_开发者")</textarea></div>
+<div class="box"><div class="title">生成的保护代码</div><textarea id="out" readonly></textarea></div>
+</div>
+<div id="status">Ready. v10.2 引擎已加载。</div>
+</main>
+
+<script>
+"use strict";
+
+document.addEventListener("DOMContentLoaded", () => {
+  let timeLeft = 5;
+  const btn = document.getElementById('btn-agree');
+  const timer = setInterval(() => {
+    timeLeft--;
+    if (timeLeft > 0) { btn.textContent = `请阅读 (${timeLeft}s)`; }
+    else {
+      clearInterval(timer);
+      btn.textContent = "我已阅读并同意免责声明";
+      btn.disabled = false;
+      btn.style.background = "#238636";
+      btn.style.color = "#fff";
+      btn.style.borderColor = "#2ea043";
+      btn.style.cursor = "pointer";
+    }
+  }, 1000);
+  btn.onclick = () => { document.getElementById('legal-modal').style.display = 'none'; };
+});
+
+/* ========================= 字节语义 ========================= */
+const BYTE_MARK=0xE000;
+function isByteChar(cp){return cp>=BYTE_MARK&&cp<=BYTE_MARK+0xFF}
+function strToBytes(s){const b=[];for(const ch of s){const cp=ch.codePointAt(0);if(isByteChar(cp)){b.push(cp-BYTE_MARK);continue}const e=new TextEncoder().encode(ch);for(const x of e)b.push(x);}return b;}
+
+/* ========================= Lexer ========================= */
+const KW=new Set(("and break continue do else elseif end false for function if in local nil not or repeat return then true until while").split(" "));
+function lex(s){
+  const t=[];let i=0,l=1,c=1;
+  const add=(k,v,L=l,C=c)=>t.push({k,v,l:L,c:C});
+  const adv=()=>{const x=s[i++];if(x==="\n"){l++;c=1}else c++;return x};
+  while(i<s.length){
+    const x=s[i];
+    if(/\s/.test(x)){adv();continue}
+    if(x==="-"&&s[i+1]==="-"){adv();adv();while(i<s.length&&s[i]!=="\n")adv();continue}
+    const L=l,C=c;
+    if(x==="'"||x==='"'){
+      const q=adv();let v="";
+      while(i<s.length&&s[i]!==q){
+        let z=adv();if(z!=="\\"){v+=z;continue}
+        z=adv();
+        if(z==="n")v+="\n";else if(z==="r")v+="\r";else if(z==="t")v+="\t";else if(z==="a")v+="\x07";else if(z==="b")v+="\b";else if(z==="f")v+="\f";else if(z==="v")v+="\x0b";else if(z==="\\")v+="\\";else if(z==='"')v+='"';else if(z==="'")v+="'";else if(z==="\n")v+="\n";
+        else if(z==="x"){const h=adv()+adv();if(!/^[0-9A-Fa-f]{2}$/.test(h))throw Error("非法的 \\x 转义: "+L+":"+C);v+=String.fromCharCode(BYTE_MARK+parseInt(h,16));}
+        else if(z==="u"){if(adv()!=="{")throw Error("非法的 \\u 转义: "+L+":"+C);let h="";while(i<s.length&&s[i]!=="}")h+=adv();if(adv()!=="}"||!/^[0-9A-Fa-f]+$/.test(h))throw Error("非法的 \\u 转义: "+L+":"+C);const cp=parseInt(h,16);if(cp>0x10FFFF)throw Error("Unicode 越界: "+L+":"+C);v+=String.fromCodePoint(cp);}
+        else if(/[0-9]/.test(z)){let d=z;while(d.length<3&&/[0-9]/.test(s[i]))d+=adv();const n=parseInt(d,10);if(n>255)throw Error("\\ddd 超过 255: "+L+":"+C);v+=String.fromCharCode(BYTE_MARK+n);}
+        else v+=z;
+      }
+      if(s[i]!==q)throw Error("未闭合字符串: "+L+":"+C);
+      adv();add("str",v,L,C);continue;
+    }
+    if(/[0-9]/.test(x)){
+      let z="";
+      if(x==="0"&&(s[i+1]==="x"||s[i+1]==="X")){z+=adv();z+=adv();while(i<s.length&&/[0-9A-Fa-f]/.test(s[i]))z+=adv();if(s[i]==="."){z+=adv();while(i<s.length&&/[0-9A-Fa-f]/.test(s[i]))z+=adv()}if(s[i]==="p"||s[i]==="P"){z+=adv();if(s[i]==="+"||s[i]==="-")z+=adv();while(i<s.length&&/[0-9]/.test(s[i]))z+=adv()}}
+      else{while(i<s.length&&/[0-9]/.test(s[i]))z+=adv();if(s[i]==="."){z+=adv();while(i<s.length&&/[0-9]/.test(s[i]))z+=adv()}if(s[i]==="e"||s[i]==="E"){z+=adv();if(s[i]==="+"||s[i]==="-")z+=adv();while(i<s.length&&/[0-9]/.test(s[i]))z+=adv()}}
+      let n;
+      if(/^0[xX]/.test(z)){const m=z.match(/^0[xX]([0-9A-Fa-f]+(?:\.[0-9A-Fa-f]*)?)(?:[pP]([+-]?\d+))?$/);if(!m)throw Error("数字错误: "+L+":"+C);const q=m[1].split("."),base=parseInt(q[0]||"0",16);n=base;if(q[1])for(let j=0;j<q[1].length;j++)n+=parseInt(q[1][j],16)/Math.pow(16,j+1);n*=Math.pow(2,Number(m[2]||0));}
+      else n=Number(z);
+      if(!Number.isFinite(n))throw Error("数字错误: "+L+":"+C);
+      add("num",n,L,C);continue;
+    }
+    if(/[A-Za-z_]/.test(x)){let z="";while(i<s.length&&/[A-Za-z0-9_]/.test(s[i]))z+=adv();add(KW.has(z)?"kw":"id",z,L,C);continue;}
+    const three=s.slice(i,i+3),two=s.slice(i,i+2);
+    if(three==="..."){adv();adv();adv();add("op","...",L,C);continue}
+    if(three==="..="){adv();adv();adv();add("op","..=",L,C);continue}
+    if(["==","~=","<=",">=","+=","-=","*=","/=","%=","..","::","->"].includes(two)){adv();adv();add("op",two,L,C);continue}
+    if("+-*/%^#=<>.,:;(){}[]".includes(x)){adv();add("op",x,L,C);continue}
+    throw Error("未知字符 "+x+" @ "+L+":"+C);
+  }
+  add("eof","<eof>",l,c);return t;
+}
+
+/* ========================= Parser ========================= */
+class P{
+  constructor(t){this.t=t;this.i=0}
+  q(v){return this.t[this.i].v===v}
+  take(){return this.t[this.i++]}
+  need(v){if(!this.q(v))this.err("需要 "+v);return this.take()}
+  err(m){const x=this.t[this.i];throw Error(m+"，实际为 "+x.v+" @ "+x.l+":"+x.c)}
+  id(){const x=this.take();if(x.k!=="id")this.err("需要标识符");return x.v}
+  parse(){return {type:"Block",body:this.block([])}}
+  block(stop){const a=[];while(this.t[this.i].k!=="eof"&&!stop.includes(this.t[this.i].v))a.push(this.stmt());return a}
+  stmt(){
+    if(this.q("local"))return this.local();
+    if(this.q("function"))return this.fnstmt();
+    if(this.q("return")){this.take();if(["end","else","elseif","until"].some(x=>this.q(x))||this.t[this.i].k==="eof"||this.q(";"))return {type:"Return",xs:[]};return {type:"Return",xs:this.list()}}
+    if(this.q("if"))return this.ifstmt();
+    if(this.q("while"))return this.whilestmt();
+    if(this.q("repeat"))return this.repeat();
+    if(this.q("for"))return this.forstmt();
+    if(this.q("break")){this.take();return {type:"Break"}}
+    if(this.q("continue")){this.take();return {type:"Continue"}}
+    if(this.q("do")){this.take();const b=this.block(["end"]);this.need("end");return {type:"Block",body:b}}
+    if(this.q(";")){this.take();return {type:"Empty"}}
+    const e=this.expr();
+    const isAssignOp=v=>["=","+=","-=","*=","/=","%=","..="].includes(v);
+    if(isAssignOp(this.t[this.i].v)||this.q(",")){
+      const left=[e];while(this.q(",")){this.take();left.push(this.expr())}
+      if(!isAssignOp(this.t[this.i].v))this.err("需要赋值运算符");
+      const op=this.take().v;if(op!=="="&&left.length!==1)this.err("复合赋值不能包含多个左值");
+      return {type:"Assign",left,right:this.list(),op};
+    }
+    return {type:"ExprStmt",e};
+  }
+  local(){this.need("local");if(this.q("function")){this.take();const n=this.id(),f=this.fnbody();return {type:"LocalFn",n,f}}const ns=[];while(true){ns.push(this.id());if(this.q(":"))this.skipType();if(!this.q(","))break;this.take()}return {type:"Local",ns,right:this.q("=")?(this.take(),this.list()):[]}}
+  fnstmt(){this.need("function");let target={type:"Var",n:this.id()},method=false;while(this.q(".")||this.q(":")){const sep=this.take().v,k=this.id();if(sep===":")method=true;target={type:"Member",o:target,k}}const f=this.fnbody();if(method)f.ps.unshift("self");return {type:"FnAssign",target,f}}
+  fnbody(){this.need("(");const ps=[];let vari=false;if(!this.q(")"))while(true){if(this.q("...")){this.take();vari=true;if(this.q(":"))this.skipType();break}ps.push(this.id());if(this.q(":"))this.skipType();if(!this.q(","))break;this.take()}this.need(")");if(this.q(":"))this.skipType();const b=this.block(["end"]);this.need("end");return {type:"Function",ps,va:vari,b}}
+  skipType(){this.need(":");let angle=0,brace=0,paren=0;while(true){const v=this.t[this.i].v;if(!v||v==="<eof>")break;if(angle===0&&brace===0&&paren===0&&["=",",",")","then","do","end",";","]"].includes(v))break;if(v==="("){paren++;this.take();continue}if(v===")"){if(paren>0){paren--;this.take();continue}break}if(v==="<"){angle++;this.take();continue}if(v===">"){if(angle>0){angle--;this.take();continue}break}if(v==="{"){brace++;this.take();continue}if(v==="}"){if(brace>0){brace--;this.take();continue}break}this.take()}}
+  ifstmt(){this.need("if");const br=[];br.push({c:this.expr(),b:(this.need("then"),this.block(["elseif","else","end"]))});while(this.q("elseif")){this.take();br.push({c:this.expr(),b:(this.need("then"),this.block(["elseif","else","end"]))})}let eb=[];if(this.q("else")){this.take();eb=this.block(["end"])}this.need("end");return {type:"If",br,eb}}
+  whilestmt(){this.need("while");const c=this.expr();this.need("do");const b=this.block(["end"]);this.need("end");return {type:"While",c,b}}
+  repeat(){this.need("repeat");const b=this.block(["until"]);this.need("until");return {type:"Repeat",b,c:this.expr()}}
+  forstmt(){this.need("for");const n=this.id();if(this.q(":"))this.skipType();if(this.q("=")){this.take();const a=this.expr();this.need(",");const z=this.expr();let step={type:"Lit",v:1};if(this.q(",")){this.take();step=this.expr()}this.need("do");const b=this.block(["end"]);this.need("end");return {type:"ForNum",n,a,z,step,b}}const ns=[n];while(this.q(",")){this.take();const m=this.id();if(this.q(":"))this.skipType();ns.push(m)}this.need("in");const xs=this.list();this.need("do");const b=this.block(["end"]);this.need("end");return {type:"ForGen",ns,xs,b}}
+  list(){const a=[this.expr()];while(this.q(",")){this.take();a.push(this.expr())}return a}
+  prec(v){return {or:1,and:2,"==":3,"~=":3,"<":3,">":3,"<=":3,">=":3,"..":4,"+":5,"-":5,"*":6,"/":6,"%":6,"^":7}[v]||0}
+  expr(min=0){let a=this.unary();while(true){const o=this.t[this.i].v,p=this.prec(o);if(!p||p<min)break;this.take();a={type:"Bin",o,a,b:this.expr(p+((o==="^"||o==="..")?0:1))}}return a}
+  unary(){const x=this.t[this.i];if((x.k==="op"&&(x.v==="-"||x.v==="#"))||(x.k==="kw"&&x.v==="not")){const o=this.take().v;return {type:"Un",o,a:this.unary()}}return this.post(this.primary())}
+  post(e){while(true){if(this.q(".")){this.take();e={type:"Member",o:e,k:this.id()};continue}if(this.q("[")){this.take();const k=this.expr();this.need("]");e={type:"Index",o:e,k};continue}if(this.q(":")){this.take();const m=this.id();e={type:"MethodCall",o:e,m,x:this.args()};continue}if(this.q("(")||this.q("{")||this.t[this.i].k==="str"){e={type:"Call",f:e,x:this.args()};continue}break}return e}
+  args(){if(this.q("(")){this.take();if(this.q(")")){this.take();return []}const a=this.list();this.need(")");return a}if(this.q("{"))return [this.table()];if(this.t[this.i].k==="str")return [this.primary()];this.err("参数错误")}
+  primary(){const x=this.t[this.i];if(x.k==="num"||x.k==="str"){this.take();return {type:"Lit",v:x.v}}if(["true","false","nil"].includes(x.v)){this.take();return {type:"Lit",v:x.v==="true"?true:x.v==="false"?false:null}}if(x.v==="..."){this.take();return {type:"Vararg"}}if(x.k==="id"){this.take();return {type:"Var",n:x.v}}if(x.v==="function"){this.take();return this.fnbody()}if(x.v==="("){this.take();const e=this.expr();this.need(")");return {type:"Paren",a:e}}if(x.v==="{")return this.table();this.err("表达式错误")}
+  table(){this.need("{");const fs=[];while(!this.q("}")){let k=null;if(this.q("[")){this.take();k=this.expr();this.need("]");this.need("=")}else if(this.t[this.i].k==="id"&&this.t[this.i+1].v==="="){k={type:"Lit",v:this.id()};this.need("=")}const v=this.expr();fs.push({k,v});if(this.q(",")||this.q(";"))this.take();else break}this.need("}");return {type:"Table",fs}}
+}
+
+/* ========================= 优化器 ========================= */
+const STMT_TYPES=new Set(["Block","Local","LocalFn","FnAssign","Assign","Return","ExprStmt","If","While","Repeat","Break","Continue","ForNum","ForGen","Empty"]);
+function truthy(v){return !(v===null||v===false)}
+function foldExpr(n){
+  if(!n||typeof n!=="object")return n;
+  if(n.type==="Function"){n.b=optStmts(n.b);return n}
+  for(const k of Object.keys(n)){if(k==="type"||k==="o")continue;const v=n[k];if(Array.isArray(v))for(let i=0;i<v.length;i++){if(v[i]&&typeof v[i]==="object"){if(v[i].type&&!STMT_TYPES.has(v[i].type))v[i]=foldExpr(v[i]);else if(v[i].v&&v[i].v.type)v[i].v=foldExpr(v[i].v);}}else if(v&&typeof v==="object"&&v.type&&!STMT_TYPES.has(v.type))n[k]=foldExpr(v);}
+  if(n.type==="Un"&&n.a?.type==="Lit"){const a=n.a.v;if(n.o==="not")return {type:"Lit",v:!truthy(a)};if(n.o==="-"&&typeof a==="number")return {type:"Lit",v:-a};if(n.o==="#"&&typeof a==="string")return {type:"Lit",v:a.length};}
+  if(n.type==="Bin"){const a=n.a,b=n.b;if(n.o==="and"&&a.type==="Lit")return truthy(a.v)?b:a;if(n.o==="or"&&a.type==="Lit")return truthy(a.v)?a:b;if(a.type==="Lit"&&b.type==="Lit"){const va=a.v,vb=b.v;try{switch(n.o){case "+":if(typeof va==="number"&&typeof vb==="number")return {type:"Lit",v:va+vb};break;case "-":if(typeof va==="number"&&typeof vb==="number")return {type:"Lit",v:va-vb};break;case "*":if(typeof va==="number"&&typeof vb==="number")return {type:"Lit",v:va*vb};break;case "/":if(typeof va==="number"&&typeof vb==="number"&&vb!==0)return {type:"Lit",v:va/vb};break;case "%":if(typeof va==="number"&&typeof vb==="number"&&vb!==0)return {type:"Lit",v:va%vb};break;case "^":if(typeof va==="number"&&typeof vb==="number")return {type:"Lit",v:Math.pow(va,vb)};break;case "..":if(typeof va==="string"&&typeof vb==="string")return {type:"Lit",v:va+vb};break;case "==":return {type:"Lit",v:va===vb};case "~=":return {type:"Lit",v:va!==vb};case "<":if(typeof va===typeof vb&&(typeof va==="number"||typeof va==="string"))return {type:"Lit",v:va<vb};break;case "<=":if(typeof va===typeof vb&&(typeof va==="number"||typeof va==="string"))return {type:"Lit",v:va<=vb};break;case ">":if(typeof va===typeof vb&&(typeof va==="number"||typeof va==="string"))return {type:"Lit",v:va>vb};break;case ">=":if(typeof va===typeof vb&&(typeof va==="number"||typeof va==="string"))return {type:"Lit",v:va>=vb};break;}}catch(_){}}}
+  return n;
+}
+function optStmts(list){const out=[];for(const s of list){const r=optStmt(s);if(r===null)continue;if(Array.isArray(r))out.push(...r);else out.push(r)}return out}
+function optStmt(s){if(!s||typeof s!=="object")return s;switch(s.type){case "Block":s.body=optStmts(s.body);return s;case "Local":s.right=s.right.map(foldExpr);return s;case "LocalFn":s.f.b=optStmts(s.f.b);return s;case "FnAssign":s.target=foldExpr(s.target);s.f.b=optStmts(s.f.b);return s;case "Assign":s.left=s.left.map(foldExpr);s.right=s.right.map(foldExpr);return s;case "Return":s.xs=s.xs.map(foldExpr);return s;case "ExprStmt":s.e=foldExpr(s.e);return s;case "While":s.c=foldExpr(s.c);s.b=optStmts(s.b);return s.c.type==="Lit"&&!truthy(s.c.v)?null:s;case "Repeat":s.b=optStmts(s.b);s.c=foldExpr(s.c);return s;case "ForNum":s.a=foldExpr(s.a);s.z=foldExpr(s.z);s.step=foldExpr(s.step);s.b=optStmts(s.b);return s;case "ForGen":s.xs=s.xs.map(foldExpr);s.b=optStmts(s.b);return s;case "If":{for(const b of s.br){b.c=foldExpr(b.c);b.b=optStmts(b.b)}s.eb=optStmts(s.eb);const br=[];let done=false;for(const b of s.br){if(done)break;if(b.c.type==="Lit"){if(truthy(b.c.v)){br.push(b);done=true}}else br.push(b)}s.br=br;if(!s.br.length)return s.eb.length?s.eb:null;if(s.br[s.br.length-1].c.type==="Lit"&&truthy(s.br[s.br.length-1].c.v))s.eb=[];return s}default:return s}}
+
+/* ========================= Compiler & Encoder ========================= */
+const O={K:1,NIL:2,MOVE:3,GG:4,SG:5,ADD:6,SUB:7,MUL:8,DIV:9,MOD:10,POW:11,CONCAT:12,EQ:13,NE:14,LT:15,LE:16,GT:17,GE:18,NOT:19,NEG:20,LEN:21,JMP:22,JIF:23,JIFN:24,NEWT:25,GET:26,SET:27,CALL:28,RET:29,CLOSURE:30,VARARG:31,UG:32,USG:33,SETLISTMR:34,NOP:35,NEWCELL:36,CALLV:37,NAMECALL:38,NAMECALLV:39};
+const OP_ORDER={};
+{ let _i=0; for(const _n of Object.keys(O)) OP_ORDER[_n]=++_i; }
+const MR=-1;
+
+class C{
+  constructor(){this.ps=[];this.fnSeq=0}
+  make(params,vararg,body,parent){const myId=this.fnSeq++;const f={id:myId,params,vararg,body,parent,code:[],ks:[],km:new Map(),locals:new Map(),ups:new Map(),caps:[],next:0,max:0,loops:[]};for(const p of params)f.locals.set(p,f.next++);this.ps.push(f);for(const s of body)this.st(f,s);if(!f.code.length||f.code[f.code.length-1].o!=="RET")this.emit(f,"RET",0,0);f.max=Math.max(f.max,f.next);return f}
+  reg(f){const r=f.next++;f.max=Math.max(f.max,f.next);return r}
+  regN(f,n){const r=f.next;f.next+=n;f.max=Math.max(f.max,f.next);return r}
+  k(f,v){const key=typeof v+":"+String(v);if(f.km.has(key))return f.km.get(key);const n=f.ks.length;f.ks.push(v);f.km.set(key,n);return n}
+  emit(f,o,...a){return f.code.push({o,a})-1}
+  patch(f,i,v){f.code[i].a[f.code[i].a.length-1]=v}
+  resolve(f,n){if(f.locals.has(n))return {t:"l",r:f.locals.get(n)};if(f.ups.has(n))return {t:"u",i:f.ups.get(n)};if(!f.parent)return {t:"g",n};const q=this.resolve(f.parent,n);if(q.t==="g")return q;const i=f.caps.length;f.caps.push(q.t==="l"?{t:"l",r:q.r}:{t:"u",i:q.i});f.ups.set(n,i);return {t:"u",i}}
+  scope(f,b){const saved=new Map(f.locals);for(const s of b)this.st(f,s);f.locals=saved}
+  loop(){return {cont:null,contJumps:[],br:[]}}
+  finishContinue(f,l,target){l.cont=target;for(const j of l.contJumps)this.patch(f,j,target)}
+  st(f,s){
+    if(s.type==="Empty")return;
+    if(s.type==="Local"){const tmp=this.regN(f,s.ns.length);this.assign(f,Array.from({length:s.ns.length},(_,i)=>tmp+i),s.right);const rs=s.ns.map(n=>{const r=this.reg(f);f.locals.set(n,r);return r});for(let i=0;i<rs.length;i++)this.emit(f,"MOVE",rs[i],tmp+i);return}
+    if(s.type==="LocalFn"){const r=this.reg(f);f.locals.set(s.n,r);const ch=this.make(s.f.ps,s.f.va,s.f.b,f);this.emit(f,"CLOSURE",r,this.ps.indexOf(ch));return}
+    if(s.type==="FnAssign"){const r=this.expr(f,s.f);this.store(f,s.target,r);return}
+    if(s.type==="Assign"){
+      if(s.op!=="="){
+        const t=s.left[0],op={"+":"ADD","-":"SUB","*":"MUL","/":"DIV","%":"MOD","..":"CONCAT"}[s.op.slice(0,-1)];let a,target;
+        if(t.type==="Var"){const q=this.resolve(f,t.n); a=this.reg(f); if(q.t==="l")this.emit(f,"MOVE",a,q.r);else if(q.t==="u")this.emit(f,"UG",a,q.i);else this.emit(f,"GG",a,this.k(f,q.n));target={kind:"var",q};}
+        else if(t.type==="Member"||t.type==="Index"){const obj=this.expr(f,t.o),sr=this.reg(f);this.emit(f,"MOVE",sr,obj);const key=t.type==="Member"?this.lit(f,t.k):this.expr(f,t.k);a=this.reg(f);this.emit(f,"GET",a,sr,key);target={kind:"table",sr,key};}
+        const b=this.expr(f,s.right[0]),r=this.reg(f);this.emit(f,op,r,a,b);
+        if(target.kind==="var"){const q=target.q;if(q.t==="l")this.emit(f,"MOVE",q.r,r);else if(q.t==="u")this.emit(f,"USG",q.i,r);else this.emit(f,"SG",r,this.k(f,q.n));}else this.emit(f,"SET",target.sr,target.key,r);
+        return;
+      }
+      const targets=[];for(const t of s.left){if(t.type==="Var")targets.push({kind:"var",q:this.resolve(f,t.n)});else if(t.type==="Member"){const o=this.expr(f,t.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);targets.push({kind:"table",sr,k:this.lit(f,t.k)});}else if(t.type==="Index"){const o=this.expr(f,t.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);targets.push({kind:"table",sr,k:this.expr(f,t.k)});}}
+      const rs=s.left.map(()=>this.reg(f));this.assign(f,rs,s.right);
+      for(let i=0;i<targets.length;i++){const t=targets[i],v=rs[i];if(t.kind==="var"){if(t.q.t==="l")this.emit(f,"MOVE",t.q.r,v);else if(t.q.t==="u")this.emit(f,"USG",t.q.i,v);else this.emit(f,"SG",v,this.k(f,t.q.n));}else this.emit(f,"SET",t.sr,t.k,v);}
+      return;
+    }
+    if(s.type==="Return"){
+      if(!s.xs.length){this.emit(f,"RET",0,0);return}
+      if(s.xs.length===1&&s.xs[0].type==="Call"){const base=this.call(f,s.xs[0],MR);this.emit(f,"RET",base-1,MR);return}
+      if(s.xs.length===1&&s.xs[0].type==="Vararg"){const base=this.reg(f);this.emit(f,"VARARG",base,MR);this.emit(f,"RET",base-1,MR);return}
+      const last=s.xs[s.xs.length-1];if(last.type==="Call"||last.type==="Vararg"){const fixed=s.xs.slice(0,-1).map(x=>this.expr(f,x));const outBase=this.regN(f,fixed.length+1);fixed.forEach((r,i)=>this.emit(f,"MOVE",outBase+1+i,r));const srcBase=last.type==="Call"?this.call(f,last,MR):this.reg(f);if(last.type==="Vararg")this.emit(f,"VARARG",srcBase,MR);this.emit(f,"RET",outBase,-1-fixed.length,srcBase);return}
+      const vals=s.xs.map(x=>this.expr(f,x)),base=this.regN(f,vals.length+1);vals.forEach((r,i)=>this.emit(f,"MOVE",base+1+i,r));this.emit(f,"RET",base,vals.length);return;
+    }
+    if(s.type==="ExprStmt"){this.expr(f,s.e);return}
+    if(s.type==="If"){const ends=[];for(const b of s.br){const c=this.expr(f,b.c),j=this.emit(f,"JIFN",c,0);this.scope(f,b.b);ends.push(this.emit(f,"JMP",0));this.patch(f,j,f.code.length)}this.scope(f,s.eb);for(const j of ends)this.patch(f,j,f.code.length);return}
+    if(s.type==="While"){const start=f.code.length,c=this.expr(f,s.c),jf=this.emit(f,"JIFN",c,0),l=this.loop();f.loops.push(l);this.finishContinue(f,l,start);this.scope(f,s.b);this.emit(f,"JMP",start);const end=f.code.length;this.patch(f,jf,end);for(const j of l.br)this.patch(f,j,end);f.loops.pop();return}
+    if(s.type==="Repeat"){const saved=new Map(f.locals),start=f.code.length,l=this.loop();f.loops.push(l);for(const x of s.b)this.st(f,x);const cond=f.code.length;this.finishContinue(f,l,cond);const c=this.expr(f,s.c);this.emit(f,"JIFN",c,start);const end=f.code.length;for(const j of l.br)this.patch(f,j,end);f.loops.pop();f.locals=saved;return}
+    if(s.type==="Break"){if(!f.loops.length)throw Error("break 不在循环中");f.loops[f.loops.length-1].br.push(this.emit(f,"JMP",0));return}
+    if(s.type==="Continue"){if(!f.loops.length)throw Error("continue 不在循环中");const l=f.loops[f.loops.length-1];if(l.cont==null)l.contJumps.push(this.emit(f,"JMP",0));else this.emit(f,"JMP",l.cont);return}
+    if(s.type==="ForNum"){this.forNum(f,s);return}
+    if(s.type==="ForGen"){this.forGen(f,s);return}
+    if(s.type==="Block"){this.scope(f,s.body);return}
+  }
+  assign(f,rs,xs){let pos=0;for(let i=0;i<xs.length;i++){const x=xs[i];if(i===xs.length-1&&(x.type==="Call"||x.type==="Vararg")){const want=rs.length-pos;const base=x.type==="Call"?this.call(f,x,want):this.reg(f);if(x.type==="Vararg")this.emit(f,"VARARG",base,want);for(let j=0;j<want;j++)this.emit(f,"MOVE",rs[pos+j],base+j);pos+=want;break}const r=this.expr(f,x);if(pos<rs.length)this.emit(f,"MOVE",rs[pos],r);pos++;}for(;pos<rs.length;pos++)this.emit(f,"NIL",rs[pos]);}
+  forNum(f,s){
+    const saved=new Map(f.locals);const cur=this.expr(f,s.a),lim=this.expr(f,s.z),step=this.expr(f,s.step);const r=this.reg(f);f.locals.set(s.n,r);const ctrl=this.reg(f);this.emit(f,"MOVE",ctrl,cur);
+    const start=f.code.length,cmp=this.reg(f),pos=this.reg(f),zero=this.lit(f,0);this.emit(f,"GE",pos,step,zero);const jneg=this.emit(f,"JIFN",pos,0);this.emit(f,"LE",cmp,ctrl,lim);const jle=this.emit(f,"JMP",0);this.patch(f,jneg,f.code.length);this.emit(f,"GE",cmp,ctrl,lim);this.patch(f,jle,f.code.length);
+    const jf=this.emit(f,"JIFN",cmp,0),l=this.loop();f.loops.push(l);this.emit(f,"NEWCELL",r);this.emit(f,"MOVE",r,ctrl);this.scope(f,s.b);this.finishContinue(f,l,f.code.length);this.emit(f,"ADD",ctrl,ctrl,step);this.emit(f,"JMP",start);
+    const end=f.code.length;this.patch(f,jf,end);for(const j of l.br)this.patch(f,j,end);f.loops.pop();f.locals=saved;
+  }
+  forGen(f,s){
+    const saved=new Map(f.locals);const vals=[];let tupleBase=null;
+    for(let i=0;i<s.xs.length;i++){const x=s.xs[i];if(i===s.xs.length-1&&x.type==="Call"){tupleBase=this.call(f,x,MR);vals.push(tupleBase);break}vals.push(this.expr(f,x));}
+    const it=vals[0],state=vals.length>1?vals[1]:(tupleBase!==null?tupleBase+1:this.lit(f,null));const ctrl=vals.length>2?vals[2]:(tupleBase!==null?tupleBase+2:this.lit(f,null));
+    const base=this.regN(f,6),st=base+1,cr=base+2,cb=base+3;this.emit(f,"MOVE",base,it);this.emit(f,"MOVE",st,state);this.emit(f,"MOVE",cr,ctrl);
+    const vr=s.ns.map(()=>this.reg(f));const start=f.code.length;this.emit(f,"MOVE",cb,base);this.emit(f,"MOVE",cb+1,st);this.emit(f,"MOVE",cb+2,cr);this.emit(f,"CALL",cb,cb,2,MR);
+    const stop=this.reg(f);this.emit(f,"EQ",stop,cb+1,this.lit(f,null));const jf=this.emit(f,"JIF",stop,0);
+    for(let i=0;i<vr.length;i++){this.emit(f,"NEWCELL",vr[i]);this.emit(f,"MOVE",vr[i],cb+1+i);f.locals.set(s.ns[i],vr[i]);}
+    this.emit(f,"MOVE",cr,cb+1);const l=this.loop();f.loops.push(l);this.scope(f,s.b);this.finishContinue(f,l,f.code.length);this.emit(f,"JMP",start);
+    const end=f.code.length;this.patch(f,jf,end);for(const j of l.br)this.patch(f,j,end);f.loops.pop();f.locals=saved;
+  }
+  lit(f,v){const r=this.reg(f);this.emit(f,"K",r,this.k(f,v));return r}
+  expr(f,e){
+    if(e.type==="Lit")return this.lit(f,e.v);
+    if(e.type==="Var"){const q=this.resolve(f,e.n),r=this.reg(f);if(q.t==="l")this.emit(f,"MOVE",r,q.r);else if(q.t==="u")this.emit(f,"UG",r,q.i);else this.emit(f,"GG",r,this.k(f,q.n));return r}
+    if(e.type==="Paren")return this.expr(f,e.a);
+    if(e.type==="Vararg"){const r=this.reg(f);this.emit(f,"VARARG",r,1);return r}
+    if(e.type==="Un"){const a=this.expr(f,e.a),r=this.reg(f);this.emit(f,{not:"NOT","-":"NEG","#":"LEN"}[e.o],r,a);return r}
+    if(e.type==="Bin"){
+      if(e.o==="and"||e.o==="or"){const a=this.expr(f,e.a),r=this.reg(f);this.emit(f,"MOVE",r,a);const j=this.emit(f,e.o==="and"?"JIFN":"JIF",a,0),b=this.expr(f,e.b);this.emit(f,"MOVE",r,b);this.patch(f,j,f.code.length);return r}
+      const a=this.expr(f,e.a),b=this.expr(f,e.b),r=this.reg(f);
+      const o={"+":"ADD","-":"SUB","*":"MUL","/":"DIV","%":"MOD","^":"POW","..":"CONCAT","==":"EQ","~=":"NE","<":"LT","<=":"LE",">":"GT",">=":"GE"}[e.o];
+      this.emit(f,o,r,a,b);return r;
+    }
+    if(e.type==="Table"){
+      const r=this.reg(f);this.emit(f,"NEWT",r);let idx=1;
+      for(let i=0;i<e.fs.length;i++){const z=e.fs[i];if(!z.k&&i===e.fs.length-1&&(z.v.type==="Call"||z.v.type==="Vararg")){let vr;if(z.v.type==="Call")vr=this.call(f,z.v,MR);else{vr=this.reg(f);this.emit(f,"VARARG",vr,MR);}this.emit(f,"SETLISTMR",r,vr,idx);idx=-1;}else{const k=z.k?this.expr(f,z.k):this.lit(f,idx++),v=this.expr(f,z.v);this.emit(f,"SET",r,k,v)}}
+      return r;
+    }
+    if(e.type==="Member"||e.type==="Index"){const o=this.expr(f,e.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);const k=e.type==="Member"?this.lit(f,e.k):this.expr(f,e.k),r=this.reg(f);this.emit(f,"GET",r,sr,k);return r}
+    if(e.type==="Function"){const ch=this.make(e.ps,e.va,e.b,f),r=this.reg(f);this.emit(f,"CLOSURE",r,this.ps.indexOf(ch));return r}
+    if(e.type==="Call")return this.call(f,e,1);
+    if(e.type==="MethodCall"){
+      const o=this.expr(f,e.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);
+      const last=e.x.length?e.x[e.x.length-1]:null,expands=!!last&&(last.type==="Call"||last.type==="Vararg");
+      const fixed=expands?e.x.length-1:e.x.length,args=expands?e.x.slice(0,-1).map(x=>this.expr(f,x)):e.x.map(x=>this.expr(f,x));
+      let spreadBase=null;if(expands){spreadBase=last.type==="Call"?this.call(f,last,MR):this.reg(f);if(last.type==="Vararg")this.emit(f,"VARARG",spreadBase,MR);}
+      const base=this.regN(f,1+fixed+(expands?8:2));this.emit(f,"MOVE",base,sr);for(let i=0;i<args.length;i++)this.emit(f,"MOVE",base+1+i,args[i]);
+      if(expands)this.emit(f,"NAMECALLV",base,this.k(f,e.m),fixed,1,spreadBase);else this.emit(f,"NAMECALL",base,this.k(f,e.m),fixed,1);
+      return base+1;
+    }
+  }
+  call(f,e,ret){
+    const fn=this.expr(f,e.f),fnReg=this.reg(f);this.emit(f,"MOVE",fnReg,fn);
+    const last=e.x.length?e.x[e.x.length-1]:null,expands=!!last&&(last.type==="Call"||last.type==="Vararg");
+    const fixed=expands?e.x.length-1:e.x.length,args=expands?e.x.slice(0,-1).map(x=>this.expr(f,x)):e.x.map(x=>this.expr(f,x));
+    let spreadBase=null;if(expands){spreadBase=last.type==="Call"?this.call(f,last,MR):this.reg(f);if(last.type==="Vararg")this.emit(f,"VARARG",spreadBase,MR);}
+    const base=this.regN(f,1+fixed+Math.max(8,ret>0?ret:1));this.emit(f,"MOVE",base,fnReg);for(let i=0;i<args.length;i++)this.emit(f,"MOVE",base+1+i,args[i]);
+    if(expands)this.emit(f,"CALLV",base,base,fixed,ret,spreadBase);else this.emit(f,"CALL",base,base,args.length,ret);
+    return base+1;
+  }
+  store(f,t,v){if(t.type==="Var"){const q=this.resolve(f,t.n);if(q.t==="l")this.emit(f,"MOVE",q.r,v);else if(q.t==="u")this.emit(f,"USG",q.i,v);else this.emit(f,"SG",v,this.k(f,q.n));return}if(t.type==="Member"){const o=this.expr(f,t.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);this.emit(f,"SET",sr,this.lit(f,t.k),v);return}if(t.type==="Index"){const o=this.expr(f,t.o),sr=this.reg(f);this.emit(f,"MOVE",sr,o);this.emit(f,"SET",sr,this.expr(f,t.k),v);return}}
+}
+
+function deriveKeyJS(a,b,c,d){let x=(a^b)&255;x=(x+((c*29)&255))&255;x^=(d*17)&255;x=(x*73+41)&255;return x||1}
+function chainStepJS(state,v,idx){let h=0;if(typeof v==="string"){const b=strToBytes(v);for(let i=0;i<b.length;i++)h=(h*33+b[i])&255}else if(v===null)h=17;else if(typeof v==="boolean")h=v?61:37;else if(typeof v==="number"){const q=Math.abs(v);h=(Math.floor(q)+(Math.floor((q%1)*1000))+19)&255}else h=113;return ((((state^((h+idx*97)&255))&255)*33+17)&255)}
+function shuffle(){const names=Object.keys(O),pool=[];for(let i=1;i<=255;i++)pool.push(i);for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}const m={},aliases={},mask=Math.floor(Math.random()*255)+1;let at=0;for(const name of names){const a=[];for(let j=0;j<3;j++)a.push((pool[at++]^mask)&255);aliases[name]=a;m[name]=a[0];}return {map:m,aliases,mask}}
+function encString(s,k,nonce){const b=strToBytes(s),out=[];for(let i=0;i<b.length;i++){const m1=(k+nonce+i*31)&255,m2=(k*17+nonce*29+i*13+97)&255;out.push((((b[i]+m1)&255)^m2)&255);}return out}
+function instrMix(seed,pi,pc,m1,m2,m3){return (seed ^ Math.imul(pi,m1) ^ Math.imul(pc,m2) ^ Math.imul((pi^pc)>>>0,m3))>>>0}
+function rndId(n,pre){const A="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";let s=pre||"_";for(let i=0;i<n;i++)s+=A[Math.random()*A.length|0];return s}
+function encodeNumber(v,m,add){if(Number.isInteger(v)&&v>=0&&v<=0xFFFFFFFF)return ["d",((((v^m)>>>0)+add)>>>0)];return ["f",v]}
+
+function encode(c,root,target){
+  const ids={vm:rndId(6,"_V"),cellK:rndId(4,"_k"),cellV:rndId(4,"_v"),tag:rndId(6,"_T")};
+  const keyParts=[1+(Math.random()*254|0),1+(Math.random()*254|0),1+(Math.random()*254|0),1+(Math.random()*254|0)];
+  const key=deriveKeyJS(...keyParts);
+  const numMask=1+(Math.random()*0xFFFF|0),numAdd=(Math.random()*0xFFFFFFFF)>>>0,sh=shuffle();
+  const ixor=(Math.random()*0xFFFFFFFF)>>>0,ix1=(0x45D9F3B|0)>>>0,ix2=(0x119DE1F3|0)>>>0,ix3=(0x27D4EB2D|0)>>>0;
+  const omap={};for(const name of Object.keys(O)){const cont=OP_ORDER[name];for(const a of sh.aliases[name]) omap[a]=cont;}
+  const varMap = {keys:rndId(5,"_vk"), codes:rndId(5,"_vc")};
+
+  const p=c.ps.map((f,pi)=>{
+    const cs=1+(Math.random()*254|0);let chain=cs;
+    const cc=f.ks.map((v,ci)=>{
+      const nonce=(chain+(ci*17)+((f.max*131)&255))&255;
+      const q=typeof v==="string"?["s",encString(v,key,nonce),nonce]:v===null?["n"]:typeof v==="boolean"?["b",v?1:0]:typeof v==="number"?encodeNumber(v,numMask,numAdd):["f",v];
+      chain=chainStepJS(chain,v,ci);return q;
+    });
+    // 安全的 NOP 膨胀
+    const paddedCode = [];
+    for(const z of f.code) {
+      if(Math.random() > 0.4) {
+        paddedCode.push({o:"NOP",a:[0]});
+      }
+      paddedCode.push(z);
+      if(Math.random() > 0.4) {
+        paddedCode.push({o:"NOP",a:[0]});
+      }
+    }
+
+    let checksum = 0;
+    for(const z of paddedCode) checksum = (checksum + OP_ORDER[z.o]) & 0xFFFF;
+    
+    return {r:f.max,cs,c:cc,cap:f.caps.map(v=>v.t==="l"?{t:"l",r:v.r}:{t:"u",i:v.i}),chk:checksum,x:paddedCode.map((z,ii)=>{
+      const mx=instrMix(ixor,pi+1,ii+1,ix1,ix2,ix3);const al=sh.aliases[z.o],pick=(mx>>>0)%3;
+      const row=[((al[pick]^(mx&255))&255)];for(const v of z.a) row.push((((v|0)>>>0)^mx)>>>0);return row;
+    })};
+  });
+  return {target, ks:keyParts, nummask:numMask, numadd:numAdd, opmask:sh.mask, o:sh.map, omap, ixor, ix1, ix2, ix3, root:c.ps.indexOf(root), pcount:p.length, p, _oa:sh.aliases, ids, varMap};
+}
+
+/* ========================= Lua 序列化 ========================= */
+function luaStringLit(s){let out='"';for(const ch of s){const cp=ch.codePointAt(0);if(isByteChar(cp))out+="\\"+String(cp-BYTE_MARK).padStart(3,"0");else if(cp===92)out+="\\\\";else if(cp===34)out+='\\"';else if(cp===10)out+="\\n";else if(cp===13)out+="\\r";else if(cp===9)out+="\\t";else if(cp>=32&&cp<=126)out+=ch;else{for(const b of new TextEncoder().encode(ch))out+="\\"+String(b).padStart(3,"0")}}return out+'"'}
+function luaData(v){if(v===null)return"nil";if(typeof v==="string")return luaStringLit(v);if(typeof v==="number")return Number.isFinite(v)?String(v):"0";if(typeof v==="boolean")return v?"true":"false";if(Array.isArray(v))return"{"+v.map(luaData).join(",")+"}";if(typeof v==="object"){const a=[];for(const k of Object.keys(v)){if(k[0]==="_")continue;const nk=/^\d+$/.test(k)?k:luaStringLit(k);a.push("["+nk+"]="+luaData(v[k]));}return"{"+a.join(",")+"}"}return"nil"}
+
+/* ========================= Runtime 生成 ========================= */
+function runtime(d, targetType){
+  const ids=d.ids; const OP=name=>String(OP_ORDER[name]);
+  const vk = d.varMap.keys;
+  
+  let compatHeader = "";
+  if (targetType === 'lua51') {
+    compatHeader = `
+local function bit_bxor(a,b) local r,p=0,1 while a>0 or b>0 do if(a%2)~=(b%2)then r=r+p end a=math.floor(a/2);b=math.floor(b/2);p=p*2 end return r end
+local bit32 = {bxor=bit_bxor}
+local loadstring = loadstring or load
+`;
+  } else if (targetType === 'lua53') {
+    compatHeader = `
+local loadstring = loadstring or load
+local table_pack = table.pack or function(...) return {n=select('#',...), ...} end
+local table_unpack = table.unpack or unpack
+`;
+  } else {
+    compatHeader = `
+local bit32 = bit32 or {bxor=function(a,b) return bit32.bxor(a,b) end}
+local loadstring = loadstring or load
+`;
+  }
+
+  return `-- Protected by Enterprise VM v10.2
+${compatHeader}
+local _bx=(type(bit32)=="table"and bit32.bxor)or nil
+local function bxor(a,b) if _bx then return _bx(a,b) end local r,p=0,1 while a>0 or b>0 do if(a%2)~=(b%2)then r=r+p end a=math.floor(a/2);b=math.floor(b/2);p=p*2 end return r end
+local _type=type local _pack=table.pack or function(...) return {n=select('#',...), ...} end local _unpack=table.unpack or unpack
+local _CS={} local _CK="${ids.cellK}" local _CV="${ids.cellV}"
+local function MKCELL(v)local t={};t[_CK]=_CS;t[_CV]=v;return t end
+local function GR(R,i) if i < 1 or i > 256 then return nil end; local v = R[i]; if v ~= nil and type(v) == "table" and v[_CK] == _CS then return v[_CV] end return v end
+local function SR(R,i,v) if i < 1 or i > 256 then return end; local c = R[i]; if c ~= nil and type(c) == "table" and c[_CK] == _CS then c[_CV] = v else R[i] = v end end
+local function XSP(a,nonce) local t={} for i=1,#a do local m1=(nonce+(i-1)*31)%256 local m2=(nonce*29+(i-1)*13+97)%256 local x=bxor(a[i],m2) t[i]=string.char((x-m1)%256) end return table.concat(t) end
+local function KC(c,nonce) if c[1]=="s" then return XSP(c[2],nonce) elseif c[1]=="n" then return nil elseif c[1]=="b" then return c[2]~=0 elseif c[1]=="d" then return bxor((c[2]-${d.numadd})%4294967296,${d.nummask}) elseif c[1]=="f" then return c[2] end return c[2] end
+local function CHAINSTEP(state,v,idx) local h=0 local tv=type(v) if tv=="string" then for j=1,#v do h=(h*33+(string.byte(v,j)or 0))%256 end elseif v==nil then h=17 elseif tv=="boolean" then h=v and 61 or 37 elseif tv=="number" then local q=math.abs(v);h=(math.floor(q)+math.floor((q%1)*1000)+19)%256 else h=113 end return (((bxor(state,(h+idx*97)%256))*33)+17)%256 end
+local KCC={} local KSTATE={} local KNULL={}
+local function KGET(P,K,idx) local target=idx+1 local v=K[target] if v~=nil then if v==KNULL then return nil end;return v end local st=KSTATE[P] if not st then st={n=0,s=P.cs};KSTATE[P]=st end while st.n<target do local j=st.n local c=P.c[j+1] if not c then st.n=st.n+1;break end local nonce=(st.s+j*17+((P.r*131)%256))%256 local q=KC(c,nonce) K[j+1]=q==nil and KNULL or q st.s=CHAINSTEP(st.s,q,j) st.n=st.n+1 end v=K[target] if v==KNULL then return nil end return v end
+local function IMIX(pi,pc) local x=bxor(${d.ixor},(pi*${d.ix1})%4294967296) x=bxor(x,(pc*${d.ix2})%4294967296) x=bxor(x,(bxor(pi,pc)*${d.ix3})%4294967296) return x end
+local function SINT(v) return v>=2147483648 and v-4294967296 or v end
+local MT={} local function NEW(p,u)return setmetatable({p=p,u=u or{}},MT)end local function TR(v)return not(v==nil or v==false)end
+local function VMT(v)local ok,t=pcall(type,v)return ok and t or"<type-error>"end
+local function VMS(v)local ok,r=pcall(tostring,v)if ok then return r end return"<tostring-error>"end
+
+local function DECRYPT_CODE(code,pi)
+  local out = {}
+  local chk = 0
+  for pc, I in ipairs(code) do
+    local mx = IMIX(pi, pc)
+    local row = {}
+    row[1] = bxor(I[1], mx % 256)
+    chk = (chk + row[1]) & 0xFFFF
+    for i=2, #I do
+      row[i] = SINT(bxor(I[i], mx))
+    end
+    out[pc] = row
+  end
+  return out, chk
+end
+
+local function VMFAIL(kind,msg,pc,A,B,C) 
+  if msg and type(msg) == "string" and msg ~= "" then error(msg, 0) end
+  error("0x"..tostring(math.random(100000, 999999)), 0) 
+end
+
+local _GG=(type(getgenv)=="function")and getgenv or nil
+local _GENV=nil if _GG then pcall(function()_GENV=_GG()end)end
+local _GT=type(_G)=="table"and _G or nil local _ET=type(_ENV)=="table"and _ENV or nil
+local _GF=type(getfenv)=="function"and getfenv or nil local _SF=type(setfenv)=="function"and setfenv or nil
+local _LOADSTRING=type(loadstring)=="function"and loadstring or load
+local _PCALL=pcall
+local _HOST_ENV=nil if _GF then local ok,e=_PCALL(_GF,0) if ok and type(e)=="table" then _HOST_ENV=e end end
+
+-- 完美反制：不污染全局，且温和反制
+local _GAME 
+pcall(function()
+    local safe = true
+    if debug and debug.getinfo then
+        local ok, info = pcall(debug.getinfo, 1, "n")
+        if not ok or (info and info.name == "hook") then safe = false end
+    end
+    if safe then _GAME = game end
+end)
+local _TASK pcall(function()_TASK=task end)
+local _INST pcall(function()_INST=Instance end) local _ENUM pcall(function()_ENUM=Enum end)
+local _TYPE pcall(function()_TYPE=typeof end) local _WS if _GAME then pcall(function()_WS=_GAME.Workspace end)end
+
+local function ENVGET(env,n) if not env then return nil end local ok,v=_PCALL(function()return env[n]end) if ok then return v end return nil end
+local SAFE_GLOBALS={pcall=_PCALL,select=select,type=type,pairs=pairs,ipairs=ipairs,next=next,tostring=tostring,tonumber=tonumber,rawget=rawget,rawset=rawset,rawequal=rawequal,setmetatable=setmetatable,getmetatable=getmetatable,assert=assert,unpack=table.unpack or unpack,print=print,warn=warn,error=error,loadstring=_LOADSTRING,load=_LOADSTRING,require=require,os=os,string=string,table=table,math=math,coroutine=coroutine,debug=debug,utf8=utf8}
+local function GGET(n) if _HOST_ENV then local v=ENVGET(_HOST_ENV,n) if v~=nil then return v end end if n=="_G"then return ENVGET(_HOST_ENV,"_G")or _GT end if n=="_ENV"then return ENVGET(_HOST_ENV,"_ENV")or _ET or _GT end if _GENV and _GENV[n]~=nil then return _GENV[n]end if _ET and _ET[n]~=nil then return _ET[n]end if _GT and _GT[n]~=nil then return _GT[n]end if n=="game"then return _GAME end if n=="task"then return _TASK end if n=="Instance"then return _INST end if n=="Enum"then return _ENUM end if n=="workspace"then return _WS end if n=="typeof"then return _TYPE end if n=="getgenv"then return _GG end if n=="getfenv"then return _GF end if n=="setfenv"then return _SF end if n=="wait"and _TASK then return _TASK.wait end if n=="spawn"and _TASK then return _TASK.spawn end if n=="delay"and _TASK then return _TASK.delay end if n=="loadstring"then return _LOADSTRING end return SAFE_GLOBALS[n] end
+local function SGET(n,v) if _HOST_ENV then local ok=_PCALL(function()_HOST_ENV[n]=v end) if ok then return end end if _GENV then _GENV[n]=v;return end if _GT then _GT[n]=v;return end if _ET then _ET[n]=v;return end end
+
+local _VM local HOST_CACHE=setmetatable({},{__mode="k"}) local CALLBACK_CACHE=setmetatable({},{__mode="k"})
+local function ISVMFUNC(v)return type(v)=="table"and getmetatable(v)==MT end
+local function HOSTCALLABLE(v) if not ISVMFUNC(v)then return v end local f=HOST_CACHE[v] if f then return f end f=function(...) local q=table.pack(...) local packed=_pack(_VM(v,q)) return _unpack(packed,1,packed.n) end HOST_CACHE[v]=f return f end
+local function HOSTEVENTCALLABLE(v) if not ISVMFUNC(v)then return v end local f=CALLBACK_CACHE[v] if f then return f end f=function(...) local q=table.pack(...) local runner=function()_VM(v,q)end if _TASK and type(_TASK.spawn)=="function" then _TASK.spawn(runner) elseif type(spawn)=="function" then spawn(runner) else runner() end end CALLBACK_CACHE[v]=f return f end
+local function HOSTARG(method,v,i) if (method=="Connect" or method=="Once" or method=="ConnectParallel") and i==1 then return HOSTEVENTCALLABLE(v) end if method=="BindToRenderStep" and i==3 then return HOSTEVENTCALLABLE(v) end return HOSTCALLABLE(v) end
+local function HOSTCALLARG(fn,v,i) if _TASK and type(v)=="table" and ISVMFUNC(v) then if (fn==_TASK.spawn or fn==_TASK.defer) and i==1 then return HOSTEVENTCALLABLE(v) end if fn==_TASK.delay and i==2 then return HOSTEVENTCALLABLE(v) end end return HOSTCALLABLE(v) end
+
+local HOSTINVOKE local NAMECALL_CACHE={} local NAMECALL_N=0 local NAMECALL_LIMIT=512
+local function HOSTNAMECALL(method,aa,argc,pc,A,B,C) local obj=aa[1] if obj==nil then VMFAIL("NAMECALL TARGET","method="..tostring(method).." target=nil",pc,A,B,C)end local tramp=NAMECALL_CACHE[method] if not tramp and _LOADSTRING and type(method)=="string" and method:match("^[A-Za-z_][A-Za-z0-9_]*$") then local src="return function(o,...) return o:"..method.."(...) end" local ok,ch=_PCALL(_LOADSTRING,src,"=${ids.tag}") if ok and type(ch)=="function" then local ok2,fn=_PCALL(ch) if ok2 and type(fn)=="function" then if NAMECALL_N<NAMECALL_LIMIT then NAMECALL_CACHE[method]=fn;NAMECALL_N=NAMECALL_N+1 end tramp=fn end end end if tramp then return HOSTINVOKE(tramp,aa,argc,pc,A,B,C) end local ok,fn=_PCALL(function()return obj[method]end) if not ok then VMFAIL("NAMECALL LOOKUP","method="..tostring(method).." lookup error="..VMS(fn),pc,A,B,C)end if fn==nil then VMFAIL("NAMECALL LOOKUP","method="..tostring(method).." member=nil type="..VMT(obj),pc,A,B,C)end if type(fn)~="function" then VMFAIL("NAMECALL TARGET","method="..tostring(method).." memberType="..VMT(fn),pc,A,B,C)end return HOSTINVOKE(fn,aa,argc,pc,A,B,C) end
+HOSTINVOKE=function(fn,aa,argc,pc,A,B,C) if fn==_LOADSTRING then if _LOADSTRING==nil then VMFAIL("LOADSTRING NIL","",pc,A,B,C)end local r=_pack(fn(_unpack(aa,1,argc))) if r[1]==nil then VMFAIL("LOADSTRING ERROR",VMS(r[2]or""),pc,A,B,C)end return r end if argc==0 then return _pack(fn()) end if argc==1 then return _pack(fn(aa[1])) end if argc==2 then return _pack(fn(aa[1],aa[2])) end if argc==3 then return _pack(fn(aa[1],aa[2],aa[3])) end if argc==4 then return _pack(fn(aa[1],aa[2],aa[3],aa[4])) end return _pack(fn(_unpack(aa,1,argc))) end
+
+local ${vk} = ${luaData(d)}
+
+local _CACHE = setmetatable({}, {__mode = "k"})
+
+_VM=function(cl,args)
+ local P=${vk}.p[cl.p+1] if not P then error("0x"..tostring(math.random(1000,9999)),0)end
+ local K=KCC[cl.p] if not K then K={};KCC[cl.p]=K end
+ args=args or{n=0};args.n=args.n or 0
+ local R,an={},args.n for i=1,an do R[i]=args[i]end
+ local VA=args
+ local pc = 1
+ local pcode = _CACHE[cl.p]
+ if not pcode then
+   local chk
+   pcode, chk = DECRYPT_CODE(P.x, cl.p + 1)
+   if chk ~= P.chk then
+     return function() while true do end end
+   end
+   _CACHE[cl.p] = pcode
+ end
+ local OMAP=${vk}.omap
+
+ while true do
+  local I=pcode[pc] if not I then return end
+  local zc=OMAP[I[1]] if not zc then error("0x"..tostring(math.random(1000,9999)),0)end
+  local A=I[2] or 0
+  local B=I[3] or 0
+  local C=I[4] or 0
+  local E=I[5]
+  local F=I[6]
+  pc=pc+1
+
+  if zc==${OP("K")} then SR(R,A+1,KGET(P,K,B))
+  elseif zc==${OP("NIL")} then SR(R,A+1,nil)
+  elseif zc==${OP("NOP")} then
+  elseif zc==${OP("MOVE")} then SR(R,A+1,GR(R,B+1))
+  elseif zc==${OP("NEWCELL")} then local r=A+1;R[r]=MKCELL(GR(R,r))
+  elseif zc==${OP("GG")} then SR(R,A+1,GGET(KGET(P,K,B)))
+  elseif zc==${OP("SG")} then SGET(KGET(P,K,B),GR(R,A+1))
+  elseif zc==${OP("UG")} then local u=cl.u[B+1];if u then SR(R,A+1,u[_CV])else SR(R,A+1,nil)end
+  elseif zc==${OP("USG")} then local u=cl.u[A+1];if u then u[_CV]=GR(R,B+1)end
+  elseif zc==${OP("ADD")} then local ok,err=pcall(function() return GR(R,B+1)+GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)+GR(R,C+1))
+  elseif zc==${OP("SUB")} then local ok,err=pcall(function() return GR(R,B+1)-GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)-GR(R,C+1))
+  elseif zc==${OP("MUL")} then local ok,err=pcall(function() return GR(R,B+1)*GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)*GR(R,C+1))
+  elseif zc==${OP("DIV")} then local ok,err=pcall(function() return GR(R,B+1)/GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)/GR(R,C+1))
+  elseif zc==${OP("MOD")} then local ok,err=pcall(function() return GR(R,B+1)%GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)%GR(R,C+1))
+  elseif zc==${OP("POW")} then local ok,err=pcall(function() return GR(R,B+1)^GR(R,C+1) end); if not ok then VMFAIL("ARITH", err, pc-1,A,B,C) end; SR(R,A+1,GR(R,B+1)^GR(R,C+1))
+  elseif zc==${OP("CONCAT")} then SR(R,A+1,GR(R,B+1)..GR(R,C+1))
+  elseif zc==${OP("EQ")} then SR(R,A+1,GR(R,B+1)==GR(R,C+1))
+  elseif zc==${OP("NE")} then SR(R,A+1,GR(R,B+1)~=GR(R,C+1))
+  elseif zc==${OP("LT")} then SR(R,A+1,GR(R,B+1)<GR(R,C+1))
+  elseif zc==${OP("LE")} then SR(R,A+1,GR(R,B+1)<=GR(R,C+1))
+  elseif zc==${OP("GT")} then SR(R,A+1,GR(R,B+1)>GR(R,C+1))
+  elseif zc==${OP("GE")} then SR(R,A+1,GR(R,B+1)>=GR(R,C+1))
+  elseif zc==${OP("NOT")} then SR(R,A+1,not TR(GR(R,B+1)))
+  elseif zc==${OP("NEG")} then SR(R,A+1,-GR(R,B+1))
+  elseif zc==${OP("LEN")} then local ok,err=pcall(function() return #GR(R,B+1) end); if not ok then VMFAIL("LEN", err, pc-1,A,B,C) end; SR(R,A+1,#GR(R,B+1))
+  elseif zc==${OP("JMP")} then pc=A+1
+  elseif zc==${OP("JIF")} then if TR(GR(R,A+1))then pc=B+1 end
+  elseif zc==${OP("JIFN")} then if not TR(GR(R,A+1))then pc=B+1 end
+  elseif zc==${OP("NEWT")} then SR(R,A+1,{})
+  elseif zc==${OP("GET")} then local tab=GR(R,B+1);local k=GR(R,C+1) if tab==nil then VMFAIL("GET NIL","",pc-1,A,B,C)end local v if _type(tab)=="table" or not VM_SAFE_GET then v=tab[k] else local ok,r=pcall(function()return tab[k]end) if not ok then VMFAIL("GET ERROR",VMS(r),pc-1,A,B,C)end v=r end SR(R,A+1,v)
+  elseif zc==${OP("SET")} then local tab=GR(R,A+1);local k=GR(R,B+1);local vv=GR(R,C+1) if tab==nil then VMFAIL("SET NIL","",pc-1,A,B,C)end if _type(tab)=="userdata"then vv=HOSTCALLABLE(vv)end if VM_SAFE_SET then local ok,er=pcall(function()tab[k]=vv end) if not ok then VMFAIL("SET ERROR",VMS(er),pc-1,A,B,C)end else tab[k]=vv end
+  elseif zc==${OP("CLOSURE")} then local cp=${vk}.p[B+1] if not cp then error("0x"..tostring(math.random(1000,9999)),0)end local u={} for i=1,#(cp.cap or{})do local dd=cp.cap[i] if dd.t=="l"then local cell=R[dd.r+1] if not ISCELL(cell)then cell=MKCELL(GR(R,dd.r+1));R[dd.r+1]=cell end u[i]=cell else u[i]=cl.u[dd.i+1]end end SR(R,A+1,NEW(B,u))
+  elseif zc==${OP("VARARG")} then local n=VA.n or 0 if B==-1 then R.__mr=n for i=1,n do SR(R,A+i,VA[i])end else R.__mr=B for i=1,B do SR(R,A+i,VA[i])end for i=n+1,B do SR(R,A+i,nil)end end
+  elseif zc==${OP("NAMECALL")} then local method=KGET(P,K,B) local argc=C or 0 local aa={n=argc+1} aa[1]=GR(R,A+1) for i=1,argc do aa[i+1]=HOSTARG(method,GR(R,A+i+1),i)end local q=HOSTNAMECALL(method,aa,argc+1,pc-1,A,B,C) if E==-1 then R.__mr=q.n;for i=1,q.n do SR(R,A+i+1,q[i])end elseif E==0 then R.__mr=0 else R.__mr=E;for i=1,E do SR(R,A+i+1,q[i])end;for i=q.n+1,E do SR(R,A+i+1,nil)end end
+  elseif zc==${OP("NAMECALLV")} then local method=KGET(P,K,B) local spreadN=R.__mr or 0 local fixed=C or 0 local argc=fixed+spreadN local aa={n=argc+1} aa[1]=GR(R,A+1) for i=1,fixed do aa[i+1]=HOSTARG(method,GR(R,A+i+1),i)end if spreadN>0 then if not F then VMFAIL("NAMECALLV FRAME","",pc-1,A,B,C)end for i=1,spreadN do aa[fixed+i+1]=HOSTARG(method,GR(R,F+i),fixed+i)end end local q=HOSTNAMECALL(method,aa,argc+1,pc-1,A,B,C) if E==-1 then R.__mr=q.n;for i=1,q.n do SR(R,A+i+1,q[i])end elseif E==0 then R.__mr=0 else R.__mr=E;for i=1,E do SR(R,A+i+1,q[i])end;for i=q.n+1,E do SR(R,A+i+1,nil)end end
+  elseif zc==${OP("CALL")} or zc==${OP("CALLV")} then local fn=GR(R,B+1) local spreadN=(zc==${OP("CALLV")}) and (R.__mr or 0) or 0 local argc=(C or 0)+spreadN local aa={n=argc} for i=1,(C or 0) do aa[i]=HOSTCALLARG(fn,GR(R,B+1+i),i)end if spreadN>0 then if not F then VMFAIL("CALLV FRAME","",pc-1,A,B,C)end for i=1,spreadN do aa[C+i]=HOSTCALLARG(fn,GR(R,F+i),C+i)end end local q if ISVMFUNC(fn)then q=_pack(_VM(fn,aa)) elseif _type(fn)=="function"then q=HOSTINVOKE(fn,aa,argc,pc-1,A,B,C) else VMFAIL("CALL TARGET","attempt to call a "..VMT(fn).." value",pc-1,A,B,C) end if E==-1 then R.__mr=q.n;for i=1,q.n do SR(R,A+1+i,q[i])end elseif E==0 then R.__mr=0 else R.__mr=E;for i=1,E do SR(R,A+1+i,q[i])end;for i=q.n+1,E do SR(R,A+1+i,nil)end end
+  elseif zc==${OP("SETLISTMR")} then local n=R.__mr or 0 local tab=GR(R,A+1) if type(tab)~="table"then error("0x"..tostring(math.random(1000,9999)),0)end local base=C or 1 for i=1,n do tab[base+i-1]=GR(R,B+i)end
+  elseif zc==${OP("RET")} then local prefix=(B and B< -1)and(-B-1)or 0 local n local src=A if B==-1 then n=R.__mr or 0 elseif prefix>0 then n=prefix+(R.__mr or 0);src=C or A+prefix else n=B end local q={n=n} if prefix>0 then for i=1,prefix do q[i]=GR(R,A+1+i)end for i=prefix+1,n do q[i]=GR(R,src+(i-prefix))end else for i=1,n do q[i]=GR(R,A+1+i)end end return table.unpack(q,1,n)
+  else error("0x"..tostring(math.random(1000,9999)),0)end
+ end
+end
+MT.__call=function(s,...)return _VM(s,table.pack(...))end
+local __ROOT=NEW(${vk}.root,{})
+return _VM(__ROOT,{n=0})`;
+}
+
+/* ========================= Feistel 网络 & 压缩封装 ========================= */
+function needsSpace(a,b){if(!a||!b)return false;const x=a[a.length-1],y=b[0];if(/[A-Za-z0-9_]/.test(x)&&/[A-Za-z0-9_]/.test(y))return true;if(/[0-9]/.test(x)&&y===".")return true;return ["--","..","==","~=","<=",">=","+=","-=","*=","/=","%=","::","->"].includes(x+y)}
+function minifyLua(s){const toks=lex(s).filter(x=>x.k!=="eof");let out="",prev="";for(const x of toks){const z=x.k==="str"?luaStringLit(x.v):String(x.v);if(needsSpace(prev,z))out+=" ";out+=z;prev=z}return out}
+
+function lzCompress(input){
+  const out=[],dict=new Map();let i=0,ctrlPos=-1,ctrl=0,bits=0;
+  const addPos=pos=>{if(pos+2>=input.length)return;const key=(input[pos]<<16)|(input[pos+1]<<8)|input[pos+2];let a=dict.get(key);if(!a){a=[];dict.set(key,a)}a.push(pos);if(a.length>96)a.shift();};
+  const beginToken=()=>{if(bits===0){ctrlPos=out.length;out.push(0);ctrl=0}};
+  const endToken=()=>{bits++;if(bits===8){out[ctrlPos]=ctrl;bits=0;ctrl=0;ctrlPos=-1}};
+  const literal=v=>{beginToken();ctrl|=1<<(7-bits);out.push(v);endToken()};
+  const reference=(off,len)=>{beginToken();const z=(off-1)*16+(len-3);out.push((z>>>8)&255,z&255);endToken()};
+  while(i<input.length){
+    let bestLen=0,bestOff=0;
+    if(i+2<input.length){const key=(input[i]<<16)|(input[i+1]<<8)|input[i+2],a=dict.get(key);if(a){const maxLen=Math.min(18,input.length-i);for(let q=a.length-1,checked=0;q>=0&&checked<96;q--,checked++){const pos=a[q],off=i-pos;if(off<1||off>4096)continue;let n=0;while(n<maxLen&&input[pos+n]===input[i+n])n++;if(n>bestLen){bestLen=n;bestOff=off;if(n===maxLen)break;}}}}
+    if(bestLen>=3){reference(bestOff,bestLen);for(let j=0;j<bestLen;j++)addPos(i+j);i+=bestLen;}
+    else{literal(input[i]);addPos(i);i++;}
+  }
+  if(bits!==0)out[ctrlPos]=ctrl;
+  return Uint8Array.from(out);
+}
+
+function toBase64Bytes(bytes){let bin='';for(let i=0;i<bytes.length;i+=16384)bin+=String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+16384,bytes.length)));return btoa(bin)}
+
+function secureEnvelope(compactSource, targetType){
+  const raw=new TextEncoder().encode(compactSource),compressed=lzCompress(raw);
+  
+  const L = new Uint8Array(compressed.length + 8);
+  L[0] = (raw.length >>> 24) & 255;
+  L[1] = (raw.length >>> 16) & 255;
+  L[2] = (raw.length >>> 8) & 255;
+  L[3] = raw.length & 255;
+  
+  L[4] = (compressed.length >>> 24) & 255;
+  L[5] = (compressed.length >>> 16) & 255;
+  L[6] = (compressed.length >>> 8) & 255;
+  L[7] = compressed.length & 255;
+  
+  L.set(compressed, 8);
+
+  const randomKey = Math.floor(Math.random() * 0xFFFFFFFF) >>> 0;
+  const randomMask = Math.floor(Math.random() * 0xFF) + 1;
+  const rounds = 10 + Math.floor(Math.random() * 10);
+  
+  let padded = L;
+  if (L.length % 2 !== 0) {
+    padded = new Uint8Array(L.length + 1);
+    padded.set(L);
+    padded[L.length] = 0;
+  }
+  let left = new Uint8Array(padded.length / 2);
+  let right = new Uint8Array(padded.length / 2);
+  for(let i=0; i<left.length; i++) { left[i] = padded[i*2]; right[i] = padded[i*2+1]; }
+  for(let r=0; r<rounds; r++) {
+    let newL = new Uint8Array(right);
+    for(let i=0; i<right.length; i++) {
+      let f = (right[i] + r * 13) ^ (left[i] * 7) ^ randomMask;
+      newL[i] = left[i] ^ (f & 255);
+    }
+    left = right; right = newL;
+  }
+  let outBytes = new Uint8Array(padded.length);
+  for(let i=0; i<left.length; i++) { outBytes[i*2] = left[i]; outBytes[i*2+1] = right[i]; }
+  const b64 = toBase64Bytes(outBytes);
+
+  let loadHeader = "";
+  if(targetType === 'lua51') {
+      loadHeader = `local _load = loadstring or load; if type(_load) ~= "function" then error("0x"..math.random(1000,9999),0) end`;
+  } else if (targetType === 'lua53') {
+      loadHeader = `local _load = load; if type(_load) ~= "function" then error("0x"..math.random(1000,9999),0) end`;
+  } else {
+      loadHeader = `local _load = loadstring or load; if type(_load) ~= "function" then error("0x"..math.random(1000,9999),0) end`;
+  }
+
+  const out = `-- Secured by Enterprise Dynamic Network (${rounds} rounds)
+local _abc="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local _map={} for i=1,#_abc do _map[_abc:sub(i,i)]=i-1 end
+local function _b64(s) local o,v,b={},0,0 for i=1,#s do local c=s:sub(i,i) if c~="=" then local q=_map[c] if q==nil then error("0x"..math.random(1000,9999),0) end v=v*64+q b=b+6 if b>=8 then b=b-8 o[#o+1]=string.char(math.floor(v/2^b)%256) v=v%2^b end end end return table.concat(o) end
+local function _bxor(a, b)
+  if bit32 and bit32.bxor then return bit32.bxor(a, b) end
+  if bit then return bit.bxor(a, b) end
+  local r, p = 0, 1
+  while a > 0 or b > 0 do
+    if (a % 2) ~= (b % 2) then r = r + p end
+    a = math.floor(a / 2); b = math.floor(b / 2); p = p * 2
+  end
+  return r
+end
+local function _lz(s) local o,n,i={},0,1 while i<=#s do local ctl=string.byte(s,i) i=i+1 for bit=7,0,-1 do if i>#s then break end if math.floor(ctl/2^bit)%2==1 then n=n+1 o[n]=string.char(string.byte(s,i)) i=i+1 else local hi,lo=string.byte(s,i,i+1) if not lo then error("0x"..math.random(1000,9999),0) end i=i+2 local z=hi*256+lo local off=math.floor(z/16)+1 local len=z%16+3 if off<1 or off>n then error("0x"..math.random(1000,9999),0) end for j=1,len do n=n+1 o[n]=o[n-off] end end end end return table.concat(o) end
+
+local _data = _b64("${b64}")
+local _actualRounds = ${rounds}
+local _randomMask = ${randomMask}
+local data_len = #_data
+if data_len % 2 ~= 0 then error("0x"..math.random(1000,9999),0) end
+
+local L = {}
+local R = {}
+for i=1, data_len/2 do
+  L[i] = string.byte(_data, (i-1)*2 + 1)
+  R[i] = string.byte(_data, (i-1)*2 + 2)
+end
+for r = _actualRounds - 1, 0, -1 do
+  local newL = {}
+  for i=1, #R do
+    local f = _bxor(R[i] + r * 13, _bxor(L[i] * 7, _randomMask))
+    newL[i] = _bxor(L[i], f % 256)
+  end
+  L = R
+  R = newL
+end
+local raw_out = {}
+for i=1, #L do
+  raw_out[#raw_out+1] = string.char(L[i])
+  if R[i] then raw_out[#raw_out+1] = string.char(R[i]) end
+end
+local decrypted = table.concat(raw_out)
+
+local _rawLen = string.byte(decrypted, 1) * 16777216 + string.byte(decrypted, 2) * 65536 + string.byte(decrypted, 3) * 256 + string.byte(decrypted, 4)
+local _compLen = string.byte(decrypted, 5) * 16777216 + string.byte(decrypted, 6) * 65536 + string.byte(decrypted, 7) * 256 + string.byte(decrypted, 8)
+
+local _compressedData = decrypted:sub(9, 8 + _compLen)
+local _source = _lz(_compressedData)
+
+if #_source < _rawLen then error("data corrupted: decompressed size mismatch", 0) end
+_source = _source:sub(1, _rawLen)
+
+${loadHeader}
+local _fn,_err=_load(_source)
+if not _fn then error("0x"..math.random(1000,9999),0) end
+return _fn()`;
+  
+  return {out, rounds};
+}
+
+/* ========================= UI Setup ========================= */
+const $=id=>document.getElementById(id);
+const modeEl=$("mode"), targetEl=$("target"), goEl=$("go"), copyEl=$("copy"), srcEl=$("src"), outEl=$("out"), statusEl=$("status");
+function setStatus(x){statusEl.textContent=String(x)}
+
+function compileSource(s, target){
+  const ast=new P(lex(s)).parse();ast.body=optStmts(ast.body);
+  const c=new C(),root=c.make([],false,ast.body,null),d=encode(c,root,target);
+  return {ast,c,root,d,out:runtime(d, target)};
+}
+
+function bigTest() {
+  let s = "-- 这是一个 10 万字节级别的大型无害测试脚本\nlocal t = {}\n";
+  for(let i=0; i<3000; i++) {
+    s += `t[${i}] = "data_" .. ${i} .. "_hello_world\\n"\n`;
+  }
+  s += "print('Big Test Done, total items:', #t)\n";
+  srcEl.value = s;
+  setStatus("已生成大文件测试脚本，长度约 " + s.length + " 字节，请点击编译生成。");
+}
+
+document.getElementById('bigtest').addEventListener('click', bigTest);
+
+goEl.addEventListener("click",()=>{
+  if(goEl.disabled)return;goEl.disabled=true;setStatus("引擎运算中，请稍候…");
+  setTimeout(()=>{
+    try{
+      const s=srcEl.value;if(!s.trim()){outEl.value="";setStatus("请输入代码");return}
+      const target = targetEl.value;
+      if(modeEl.value==="min"){outEl.value=minifyLua(s);setStatus("Minify 完成");return}
+      
+      const r=compileSource(s, target);let final=r.out,extra="";
+      if(modeEl.value==="vm_min")final=minifyLua(r.out);
+      else if(modeEl.value==="vm_pack40"){
+        const compacted=minifyLua(r.out),packed=secureEnvelope(compacted, target);final=packed.out;
+        extra=`\nFeistel 轮数: ${packed.rounds}\n运行要求: 目标环境必须允许 load/loadstring`;
+      }
+      outEl.value=final;
+      setStatus(`编译成功！\n目标平台: ${target}\n输入原始字节: ${new TextEncoder().encode(s).length}\n输出字节数: ${final.length}${extra}`);
+    }catch(e){outEl.value="";setStatus("编译失败\n"+(e&&e.message?e.message:String(e)));}
+    finally{goEl.disabled=false}
+  },10);
+});
+
+copyEl.addEventListener("click",async()=>{
+  try{if(!outEl.value){setStatus("没有可复制的输出");return}if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(outEl.value);else{outEl.focus();outEl.select();document.execCommand("copy");outEl.setSelectionRange(0,0)}setStatus("已复制到剪贴板");}catch(e){setStatus("复制失败")}
+});
+setStatus("Ready. v10.2 Ultimate：完美反制已就绪，不再误伤正常环境。");
+</script>
+</body>
+</html>
